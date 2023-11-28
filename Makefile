@@ -1,8 +1,8 @@
-CC = gcc
-CFLAGS = -Wall -Werror -g
+CC = nvcc
+CFLAGS = 
 
 TARGET = shell
-SRCS = shell.c 
+SRCS = shell.cu 
 
 $(TARGET): $(SRCS)
 	$(CC) $(CFLAGS) -o $@ $^
