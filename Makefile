@@ -2,7 +2,7 @@ CC = nvcc
 CFLAGS = 
 
 TARGET = shell
-SRCS = shell.cu 
+SRCS = shell.cu
 
 $(TARGET): $(SRCS)
 	$(CC) $(CFLAGS) -o $@ $^

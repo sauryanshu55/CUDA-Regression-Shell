@@ -10,11 +10,41 @@
 
 // Global array to store data
 double data[MAX_VARIABLES][MAX_DATA_POINTS];
-
 // Array to store variable names
 char variableNames[MAX_VARIABLES][MAX_VARIABLE_NAME_LENGTH];
+// Matrix
+double **matrix;
 
+int numVars;
+int numObservations;
 bool data_primed = false;
+
+// Function to populate the matrix with data
+void createMatrix() {
+        // Allocate memory for the matrix
+    matrix = (double **)malloc((numObservations+1) * sizeof(double *));
+    for (int i = 0; i < numObservations; i++) {
+        matrix[i] = (double *)malloc((numVars + 1) * sizeof(double)); // +1 for the additional column
+    }
+
+    // Populate the matrix with 1's in the first column and data in the rest
+    for (int i = 0; i < numObservations; i++) {
+        matrix[i][0] = 1.0; // Populate the first column with 1's
+
+        for (int j = 1; j <= numVars+1; j++) {
+            matrix[i][j] = data[j-1][i]; // Populate the rest of the columns with data
+        }
+    }
+}
+
+void printMatrix() {
+    for (int i = 0; i < numObservations; i++) {
+        for (int j = 0; j < numVars+1; j++) {
+            printf("%.2f\t", matrix[i][j]);
+        }
+        printf("\n");
+    }
+}
 
 // Function to read CSV file and initialize data array
 int readCSV(const char *filename) {
@@ -41,6 +71,7 @@ int readCSV(const char *filename) {
             token = strtok(NULL, ",");
             variableIndex++;
         }
+        numVars=variableIndex;
     }
 
     // Read the rest of the file to get numerical data
@@ -61,6 +92,7 @@ int readCSV(const char *filename) {
 
         dataPointIndex++;
     }
+    numObservations=dataPointIndex-1;
 
     fclose(file);
     return 0;
@@ -100,6 +132,7 @@ int executeCommand(char command[]) {
         if (readCSV(file_loc) == 0) {
             printf("Read CSV file from: %s \n", file_loc);
             data_primed = true;
+            createMatrix();
         } else {
             printf("No such CSV file exists AND/OR Error in reading CSV File\n");
         }
@@ -110,6 +143,8 @@ int executeCommand(char command[]) {
     if (strcmp(command, "view") == 0) {
         if (data_primed) {
             printData();
+            printf("Number of vars: %d\nNumber of observations: %d\n",numVars,numObservations);
+            printMatrix();
         } else {
             printf("Data is not loaded yet\n");
         }
