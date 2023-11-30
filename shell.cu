@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "util.h"
 
 #define MAX_VARIABLES 50
 #define MAX_DATA_POINTS 1000
@@ -20,11 +21,11 @@ int numObservations;
 bool data_primed = false;
 
 // Function to populate the matrix with data
-void createMatrix() {
+void createDataMatrix() {
         // Allocate memory for the matrix
-    matrix = (double **)malloc((numObservations+1) * sizeof(double *));
+    matrix = (double **)malloc((numObservations) * sizeof(double *));
     for (int i = 0; i < numObservations; i++) {
-        matrix[i] = (double *)malloc((numVars + 1) * sizeof(double)); // +1 for the additional column
+        matrix[i] = (double *)malloc((numVars) * sizeof(double)); // +1 for the additional column
     }
 
     // Populate the matrix with 1's in the first column and data in the rest
@@ -32,15 +33,32 @@ void createMatrix() {
         matrix[i][0] = 1.0; // Populate the first column with 1's
 
         for (int j = 1; j <= numVars+1; j++) {
-            matrix[i][j] = data[j-1][i]; // Populate the rest of the columns with data
+            matrix[i][j] = data[j][i]; // Populate the rest of the columns with data
         }
     }
 }
 
-void printMatrix() {
+void printDataMatrix() {
     for (int i = 0; i < numObservations; i++) {
-        for (int j = 0; j < numVars+1; j++) {
+        for (int j = 0; j < numVars; j++) {
             printf("%.2f\t", matrix[i][j]);
+        }
+        printf("\n");
+    }
+}
+
+// Function to print the imported data
+void printCSVData() {
+    printf("Variable Names:\n");
+    for (int i = 0; i < MAX_VARIABLES && variableNames[i][0] != '\0'; i++) {
+        printf("%s\t", variableNames[i]);
+    }
+
+    printf("\n");
+
+    for (int j = 0; j < MAX_DATA_POINTS && data[0][j] != 0; j++) {
+        for (int i = 0; i < MAX_VARIABLES && variableNames[i][0] != '\0'; i++) {
+            printf("%lf\t", data[i][j]);
         }
         printf("\n");
     }
@@ -98,23 +116,6 @@ int readCSV(const char *filename) {
     return 0;
 }
 
-// Function to print the imported data
-void printData() {
-    printf("Variable Names:\n");
-    for (int i = 0; i < MAX_VARIABLES && variableNames[i][0] != '\0'; i++) {
-        printf("%s\t", variableNames[i]);
-    }
-
-    printf("\n");
-
-    for (int j = 0; j < MAX_DATA_POINTS && data[0][j] != 0; j++) {
-        for (int i = 0; i < MAX_VARIABLES && variableNames[i][0] != '\0'; i++) {
-            printf("%lf\t", data[i][j]);
-        }
-        printf("\n");
-    }
-}
-
 int executeCommand(char command[]) {
     // exit
     if (strcmp(command, "exit") == 0) {
@@ -132,7 +133,7 @@ int executeCommand(char command[]) {
         if (readCSV(file_loc) == 0) {
             printf("Read CSV file from: %s \n", file_loc);
             data_primed = true;
-            createMatrix();
+            createDataMatrix();
         } else {
             printf("No such CSV file exists AND/OR Error in reading CSV File\n");
         }
@@ -142,15 +143,21 @@ int executeCommand(char command[]) {
     // view
     if (strcmp(command, "view") == 0) {
         if (data_primed) {
-            printData();
+            printCSVData();
             printf("Number of vars: %d\nNumber of observations: %d\n",numVars,numObservations);
-            printMatrix();
         } else {
             printf("Data is not loaded yet\n");
         }
         return 1;
     }
 
+
+    if (strcmp(command,"def")==0){
+        readCSV("csv.csv");
+        data_primed=true;
+        printf("Read CSV file from: csv.csv \n");
+        return 1;
+    }    
     // Unrecognized command
     return 0;
 }
