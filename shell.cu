@@ -156,6 +156,10 @@ int executeCommand(char command[]) {
         readCSV("csv.csv");
         data_primed=true;
         printf("Read CSV file from: csv.csv \n");
+
+        double **test=createMatrix(5,5);
+        double **dest=copyMatrix(test,5,5);
+        printMatrix(dest,5,5);
         return 1;
     }    
     // Unrecognized command

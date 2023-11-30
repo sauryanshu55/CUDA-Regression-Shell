@@ -26,3 +26,14 @@ void printMatrix(double **matrix, int rows, int columns) {
         printf("\n");
     }
 }
+
+// Function to copy the content of a source matrix and return a new matrix
+double **copyMatrix(double **source, int rows, int columns) {
+    double **destination = createMatrix(rows, columns);
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < columns; j++) {
+            destination[i][j] = source[i][j];
+        }
+    }
+    return destination;
+}
