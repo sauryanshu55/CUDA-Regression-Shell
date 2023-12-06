@@ -2,63 +2,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "util.h"
+#include <cuda_runtime.h>
 
-#define MAX_VARIABLES 50
+#define MAX_VARIABLES 3
 #define MAX_DATA_POINTS 1000
 #define MAX_VARIABLE_NAME_LENGTH 50
 #define MAX_COMMAND_LENGTH 100
 
 // Global array to store data
-double data[MAX_VARIABLES][MAX_DATA_POINTS];
+double data[MAX_VARIABLES * MAX_DATA_POINTS];
+
+double data_cpy[MAX_VARIABLES * MAX_DATA_POINTS];
+
 // Array to store variable names
-char variableNames[MAX_VARIABLES][MAX_VARIABLE_NAME_LENGTH];
-// Matrix
-double **matrix;
+char variableNames[MAX_VARIABLES][256];
 
 int numVars;
 int numObservations;
 bool data_primed = false;
 
-// Function to populate the matrix with data
-void createDataMatrix() {
-        // Allocate memory for the matrix
-    matrix = (double **)malloc((numObservations) * sizeof(double *));
-    for (int i = 0; i < numObservations; i++) {
-        matrix[i] = (double *)malloc((numVars) * sizeof(double)); // +1 for the additional column
-    }
-
-    // Populate the matrix with 1's in the first column and data in the rest
-    for (int i = 0; i < numObservations; i++) {
-        matrix[i][0] = 1.0; // Populate the first column with 1's
-
-        for (int j = 1; j <= numVars+1; j++) {
-            matrix[i][j] = data[j][i]; // Populate the rest of the columns with data
-        }
-    }
-}
-
-void printDataMatrix() {
-    for (int i = 0; i < numObservations; i++) {
-        for (int j = 0; j < numVars; j++) {
-            printf("%.2f\t", matrix[i][j]);
-        }
-        printf("\n");
-    }
-}
-
 // Function to print the imported data
-void printCSVData() {
+void printCSVData(double* data_to_copy) {
     printf("Variable Names:\n");
-    for (int i = 0; i < MAX_VARIABLES && variableNames[i][0] != '\0'; i++) {
+    for (int i = 0; i < numVars; i++) {
         printf("%s\t", variableNames[i]);
     }
 
     printf("\n");
 
-    for (int j = 0; j < MAX_DATA_POINTS && data[0][j] != 0; j++) {
-        for (int i = 0; i < MAX_VARIABLES && variableNames[i][0] != '\0'; i++) {
-            printf("%lf\t", data[i][j]);
+    for (int j = 0; j < numObservations+1; j++) {
+        for (int i = 0; i < numVars; i++) {
+            printf("%lf\t", data_to_copy[j * numVars + i]);
         }
         printf("\n");
     }
@@ -89,7 +63,7 @@ int readCSV(const char *filename) {
             token = strtok(NULL, ",");
             variableIndex++;
         }
-        numVars=variableIndex;
+        numVars = variableIndex;
     }
 
     // Read the rest of the file to get numerical data
@@ -99,10 +73,10 @@ int readCSV(const char *filename) {
         int variableIndex = 0;
 
         while (token != NULL && variableIndex < MAX_VARIABLES) {
-            sscanf(token, " %lf", &data[variableIndex][dataPointIndex]);
+            sscanf(token, " %lf", &data[dataPointIndex * numVars + variableIndex]);
 
             // Print data if needed
-            // printf("%s: %lf\n", variableNames[variableIndex], data[variableIndex][dataPointIndex]);
+            printf("%s: %lf\n", variableNames[variableIndex], data[dataPointIndex * numVars + variableIndex]);
 
             token = strtok(NULL, ",");
             variableIndex++;
@@ -110,10 +84,41 @@ int readCSV(const char *filename) {
 
         dataPointIndex++;
     }
-    numObservations=dataPointIndex-1;
+    numObservations = dataPointIndex - 1;
 
     fclose(file);
     return 0;
+}
+
+// CUDA kernel to copy array from device to device
+__global__ void copyArray(double *data, double *data_copy, int size) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Check for valid thread index
+    if (tid < size) {
+        data_copy[tid] = data[tid];
+    }
+}
+
+int copyDataToGPU(){
+    double *gpu_data, *gpu_data_cpy;
+    
+    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
+    cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
+
+    cudaMemcpy(gpu_data,data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
+
+    copyArray<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS));
+    
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyDeviceToHost);
+    
+    printCSVData(data_cpy);
+    return 1;
 }
 
 int executeCommand(char command[]) {
@@ -133,7 +138,6 @@ int executeCommand(char command[]) {
         if (readCSV(file_loc) == 0) {
             printf("Read CSV file from: %s \n", file_loc);
             data_primed = true;
-            createDataMatrix();
         } else {
             printf("No such CSV file exists AND/OR Error in reading CSV File\n");
         }
@@ -143,7 +147,7 @@ int executeCommand(char command[]) {
     // view
     if (strcmp(command, "view") == 0) {
         if (data_primed) {
-            printCSVData();
+            printCSVData(data);
             printf("Number of vars: %d\nNumber of observations: %d\n",numVars,numObservations);
         } else {
             printf("Data is not loaded yet\n");
@@ -156,11 +160,7 @@ int executeCommand(char command[]) {
         readCSV("csv.csv");
         data_primed=true;
         printf("Read CSV file from: csv.csv \n");
-
-        double **test=createMatrix(5,5);
-        double **dest=copyMatrix(test,5,5);
-        printMatrix(dest,5,5);
-        
+        copyDataToGPU();
         return 1;
     }    
     // Unrecognized command
