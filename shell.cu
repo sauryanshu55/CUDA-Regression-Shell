@@ -118,9 +118,9 @@ int copyDataToGPU(){
 
     cudaMemcpy(data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
     
-    printCSVData(data_cpy);
+    // printCSVData(data_cpy);
     cudaFree(gpu_data);
-    // cudaFree(gpu_data_cpy);
+    cudaFree(gpu_data_cpy);
     return 1;
 }
 
@@ -133,8 +133,6 @@ __global__ void calculateSquare(int* data, int* sum, int size){
         // sum+=data[index]*data[index];
         atomicAdd(sum,data[index]*data[index]);
     }
-
-    // printf("%d\n",*sum);
 }
 
 int calculateVarSquared(){
@@ -151,11 +149,13 @@ int calculateVarSquared(){
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
-    calculateSquare<<<gridSize,blockSize>>>(data_cpy,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS));
+    calculateSquare<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS));
 
+    cudaDeviceSynchronize();
     cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
 
-    // printf("Sum of squares: %d \n",sum);
+    cudaFree(gpu_data);
+    cudaFree(gpu_result);
     return 0;
 }
 int executeCommand(char command[]) {
