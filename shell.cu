@@ -10,9 +10,9 @@
 #define MAX_COMMAND_LENGTH 100
 
 // Global array to store data
-double data[MAX_VARIABLES * MAX_DATA_POINTS];
+int data[MAX_VARIABLES * MAX_DATA_POINTS];
 
-double data_cpy[MAX_VARIABLES * MAX_DATA_POINTS];
+int data_cpy[MAX_VARIABLES * MAX_DATA_POINTS];
 
 // Array to store variable names
 char variableNames[MAX_VARIABLES][256];
@@ -22,7 +22,7 @@ int numObservations;
 bool data_primed = false;
 
 // Function to print the imported data
-void printCSVData(double* data_to_copy) {
+void printCSVData(int* data_to_copy) {
     printf("Variable Names:\n");
     for (int i = 0; i < numVars; i++) {
         printf("%s\t", variableNames[i]);
@@ -32,7 +32,7 @@ void printCSVData(double* data_to_copy) {
 
     for (int j = 0; j < numObservations+1; j++) {
         for (int i = 0; i < numVars; i++) {
-            printf("%lf\t", data_to_copy[j * numVars + i]);
+            printf("%d\t", data_to_copy[j * numVars + i]);
         }
         printf("\n");
     }
@@ -73,10 +73,10 @@ int readCSV(const char *filename) {
         int variableIndex = 0;
 
         while (token != NULL && variableIndex < MAX_VARIABLES) {
-            sscanf(token, " %lf", &data[dataPointIndex * numVars + variableIndex]);
+            sscanf(token, " %d", &data[dataPointIndex * numVars + variableIndex]);
 
             // Print data if needed
-            // printf("%s: %lf\n", variableNames[variableIndex], data[dataPointIndex * numVars + variableIndex]);
+            // printf("%s: %d\n", variableNames[variableIndex], data[dataPointIndex * numVars + variableIndex]);
 
             token = strtok(NULL, ",");
             variableIndex++;
@@ -91,7 +91,7 @@ int readCSV(const char *filename) {
 }
 
 // CUDA kernel to copy array from device to device
-__global__ void copyArray(double *data, double *data_copy, int size) {
+__global__ void copyArray(int *data, int *data_copy, int size) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Check for valid thread index
@@ -102,12 +102,12 @@ __global__ void copyArray(double *data, double *data_copy, int size) {
 
 
 int copyDataToGPU(){
-    double *gpu_data, *gpu_data_cpy;
+    int *gpu_data, *gpu_data_cpy;
     
-    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
-    cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
+    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
 
-    cudaMemcpy(gpu_data,data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyHostToDevice);
+    cudaMemcpy(gpu_data,data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
@@ -116,43 +116,46 @@ int copyDataToGPU(){
     
     cudaDeviceSynchronize();
 
-    cudaMemcpy(data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyDeviceToHost);
+    cudaMemcpy(data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
     
-    // printCSVData(data_cpy);
+    printCSVData(data_cpy);
     cudaFree(gpu_data);
-    cudaFree(gpu_data_cpy);
+    // cudaFree(gpu_data_cpy);
     return 1;
 }
 
-__global__ void calculateSquare(double* data, double* sum, int size){
+__global__ void calculateSquare(int* data, int* sum, int size){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     int index=3*tid+1;
     
-    // if (index<size){
-    //     atomicAdd(sum,data[index]*data[index]);
-    // }
+    if (index<size){
+        // sum+=data[index]*data[index];
+        atomicAdd(sum,data[index]*data[index]);
+    }
+
+    // printf("%d\n",*sum);
 }
 
-double calculateVarSquared(){
-    double *gpu_data;
-    double *gpu_result;
-    double sum=0;
+int calculateVarSquared(){
+    int *gpu_data;
+    int *gpu_result;
+    int sum=0;
 
-    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
-    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
-    cudaMalloc((void**)&gpu_result,sizeof(double));
-    cudaMemcpy(gpu_result,&sum,sizeof(double),cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&gpu_result,sizeof(int));
+    cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice);
 
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
     calculateSquare<<<gridSize,blockSize>>>(data_cpy,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS));
 
-    cudaMemcpy(&sum,gpu_result,sizeof(double),cudaMemcpyDeviceToHost);
+    cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
 
-    printf("Sum of squares: %lf \n",sum);
+    // printf("Sum of squares: %d \n",sum);
     return 0;
 }
 int executeCommand(char command[]) {
