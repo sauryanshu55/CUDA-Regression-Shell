@@ -76,7 +76,7 @@ int readCSV(const char *filename) {
             sscanf(token, " %lf", &data[dataPointIndex * numVars + variableIndex]);
 
             // Print data if needed
-            printf("%s: %lf\n", variableNames[variableIndex], data[dataPointIndex * numVars + variableIndex]);
+            // printf("%s: %lf\n", variableNames[variableIndex], data[dataPointIndex * numVars + variableIndex]);
 
             token = strtok(NULL, ",");
             variableIndex++;
@@ -100,6 +100,7 @@ __global__ void copyArray(double *data, double *data_copy, int size) {
     }
 }
 
+
 int copyDataToGPU(){
     double *gpu_data, *gpu_data_cpy;
     
@@ -117,10 +118,43 @@ int copyDataToGPU(){
 
     cudaMemcpy(data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyDeviceToHost);
     
-    printCSVData(data_cpy);
+    // printCSVData(data_cpy);
+    cudaFree(gpu_data);
+    cudaFree(gpu_data_cpy);
     return 1;
 }
 
+__global__ void calculateSquare(double* data, double* sum, int size){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int index=3*tid+1;
+    
+    // if (index<size){
+    //     atomicAdd(sum,data[index]*data[index]);
+    // }
+}
+
+double calculateVarSquared(){
+    double *gpu_data;
+    double *gpu_result;
+    double sum=0;
+
+    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
+    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpu_result,sizeof(double));
+    cudaMemcpy(gpu_result,&sum,sizeof(double),cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
+
+    calculateSquare<<<gridSize,blockSize>>>(data_cpy,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS));
+
+    cudaMemcpy(&sum,gpu_result,sizeof(double),cudaMemcpyDeviceToHost);
+
+    printf("Sum of squares: %lf \n",sum);
+    return 0;
+}
 int executeCommand(char command[]) {
     // exit
     if (strcmp(command, "exit") == 0) {
@@ -161,6 +195,8 @@ int executeCommand(char command[]) {
         data_primed=true;
         printf("Read CSV file from: csv.csv \n");
         copyDataToGPU();
+        calculateVarSquared();
+
         return 1;
     }    
     // Unrecognized command
