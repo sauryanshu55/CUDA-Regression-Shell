@@ -25,6 +25,9 @@ bool data_primed = false;
 typedef struct calculationInfo_t{
     int sumSquaredX1;
     int sumSquaredX2;
+    int sumX1X2;
+    int sumX1Y;
+    int sumX2Y;
 } calculationInfo_t;
 
 calculationInfo_t globalCalculationInfo;
@@ -171,38 +174,43 @@ int calculateVarSquared(int xvar){
     return 0;
 }
 
-__global__ void calculateProductSquaredKernel(int* data, int* product_array, int size,int var1,int var2){
+__global__ void calculateSumOfProductSquaredKernel(int* data, int* sum, int size,int var1,int var2){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     int firstIndex=3*tid+var1;
     int secondIndex=3*tid+var2;
 
     if ((firstIndex<size)||(secondIndex<size)){
-        product_array[tid]=data[firstIndex]*data[secondIndex];
+        atomicAdd(sum,data[firstIndex]*data[secondIndex]);
     }
 }
 
-int calculateProductSquared(int var1, int var2){
-    int *gpu_data;
-    int *gpu_result;
-    int *product_array;
 
-    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+int calculateSumOfProductSquared(int var1, int var2){
+    int *gpuData,*gpuResult;
+    int sum=0;
 
-    cudaMalloc((void**)&gpu_result,sizeof(int));
-    cudaMemcpy(gpu_result,&product_array,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMemcpy(gpuData,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpuResult,sizeof(int));
+    cudaMemcpy(gpuResult,&sum,sizeof(int),cudaMemcpyHostToDevice);
 
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
-    calculateProductSquaredKernel<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS),var1,var2);
-
+    calculateSumOfProductSquaredKernel<<<gridSize,blockSize>>>(gpuData,gpuResult,(MAX_VARIABLES*MAX_DATA_POINTS),var1,var2);
+    
     cudaDeviceSynchronize();
-    cudaMemcpy(&product_array,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
 
-    cudaFree(gpu_data);
-    cudaFree(gpu_result);
+    cudaMemcpy(&sum,gpuResult,sizeof(int),cudaMemcpyDeviceToHost);
+
+    cudaFree(gpuResult);
+    cudaFree(gpuData);
+
+    if ((var1==0)&&(var2==1)) globalCalculationInfo.sumX1Y=sum;
+    if ((var1==0)&&(var2==2)) globalCalculationInfo.sumX2Y=sum;
+    if ((var1==1)&&(var2==2)) globalCalculationInfo.sumX1X2=sum;
 
     return 0;
 }
@@ -210,6 +218,10 @@ int calculateProductSquared(int var1, int var2){
 int runRegression(){
     calculateVarSquared(1);
     calculateVarSquared(2);
+    calculateSumOfProductSquared(0,1);
+    calculateSumOfProductSquared(0,2);
+    calculateSumOfProductSquared(1,2);
+
     return 1;
 }
 
