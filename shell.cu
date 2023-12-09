@@ -21,6 +21,14 @@ int numVars;
 int numObservations;
 bool data_primed = false;
 
+
+typedef struct calculationInfo_t{
+    int sumSquaredX1;
+    int sumSquaredX2;
+} calculationInfo_t;
+
+calculationInfo_t globalCalculationInfo;
+
 // Function to print the imported data
 void printCSVData(int* data_to_copy) {
     printf("Variable Names:\n");
@@ -91,7 +99,7 @@ int readCSV(const char *filename) {
 }
 
 // CUDA kernel to copy array from device to device
-__global__ void copyArray(int *data, int *data_copy, int size) {
+__global__ void copyArrayKernel(int *data, int *data_copy, int size) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Check for valid thread index
@@ -112,7 +120,7 @@ int copyDataToGPU(){
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
-    copyArray<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS));
+    copyArrayKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS));
     
     cudaDeviceSynchronize();
 
@@ -124,10 +132,10 @@ int copyDataToGPU(){
     return 1;
 }
 
-__global__ void calculateSquare(int* data, int* sum, int size){
+__global__ void calculateSquareKernel(int* data, int* sum, int size,int xvar){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    int index=3*tid+1;
+    int index=3*tid+xvar;
     
     if (index<size){
         // sum+=data[index]*data[index];
@@ -135,7 +143,7 @@ __global__ void calculateSquare(int* data, int* sum, int size){
     }
 }
 
-int calculateVarSquared(){
+int calculateVarSquared(int xvar){
     int *gpu_data;
     int *gpu_result;
     int sum=0;
@@ -149,15 +157,63 @@ int calculateVarSquared(){
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
-    calculateSquare<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS));
+    calculateSquareKernel<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS),xvar);
 
     cudaDeviceSynchronize();
     cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
 
     cudaFree(gpu_data);
     cudaFree(gpu_result);
+
+    if(xvar==1)  globalCalculationInfo.sumSquaredX1=sum;
+    if(xvar==2) globalCalculationInfo.sumSquaredX2=sum;
+
     return 0;
 }
+
+__global__ void calculateProductSquaredKernel(int* data, int* product_array, int size,int var1,int var2){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int firstIndex=3*tid+var1;
+    int secondIndex=3*tid+var2;
+
+    if ((firstIndex<size)||(secondIndex<size)){
+        product_array[tid]=data[firstIndex]*data[secondIndex];
+    }
+}
+
+int calculateProductSquared(int var1, int var2){
+    int *gpu_data;
+    int *gpu_result;
+    int *product_array;
+
+    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpu_result,sizeof(int));
+    cudaMemcpy(gpu_result,&product_array,sizeof(int),cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
+
+    calculateProductSquaredKernel<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS),var1,var2);
+
+    cudaDeviceSynchronize();
+    cudaMemcpy(&product_array,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
+
+    cudaFree(gpu_data);
+    cudaFree(gpu_result);
+
+    return 0;
+}
+
+int runRegression(){
+    calculateVarSquared(1);
+    calculateVarSquared(2);
+    return 1;
+}
+
+
 int executeCommand(char command[]) {
     // exit
     if (strcmp(command, "exit") == 0) {
@@ -198,8 +254,7 @@ int executeCommand(char command[]) {
         data_primed=true;
         printf("Read CSV file from: csv.csv \n");
         copyDataToGPU();
-        calculateVarSquared();
-
+        runRegression();
         return 1;
     }    
     // Unrecognized command
