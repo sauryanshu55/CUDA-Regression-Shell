@@ -51,7 +51,7 @@ void printCSVData(int* data_to_copy) {
 
     printf("\n");
 
-    for (int j = 0; j < numObservations+1; j++) {
+    for (int j = 0; j < numObservations; j++) {
         for (int i = 0; i < numVars; i++) {
             printf("%d\t", data_to_copy[j * numVars + i]);
         }
