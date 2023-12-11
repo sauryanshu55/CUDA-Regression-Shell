@@ -28,9 +28,19 @@ typedef struct calculationInfo_t{
     int sumX1X2;
     int sumX1Y;
     int sumX2Y;
+    int sumX1;
+    int sumX2;
+    int sumY;
 } calculationInfo_t;
 
+typedef struct regressionInfo_t{
+    double beta_0;
+    double beta_1;
+    double beta_2;
+} regressionInfo_t;
+
 calculationInfo_t globalCalculationInfo;
+regressionInfo_t globalRegressionInfo;
 
 // Function to print the imported data
 void printCSVData(int* data_to_copy) {
@@ -95,7 +105,7 @@ int readCSV(const char *filename) {
 
         dataPointIndex++;
     }
-    numObservations = dataPointIndex - 1;
+    numObservations = dataPointIndex;
 
     fclose(file);
     return 0;
@@ -215,20 +225,78 @@ int calculateSumOfProductSquared(int var1, int var2){
     return 0;
 }
 
+__global__ void calculateVarSumKernel(int* data, int* sum, int size,int var){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int index=3*tid+var;
+
+    if (index<size){
+        // sum+=data[index]*data[index];
+        atomicAdd(sum,data[index]);
+    }
+}
+
+int calculateVarSum(int var){
+    int *gpu_data;
+    int *gpu_result;
+    int sum=0;
+
+    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpu_result,sizeof(int));
+    cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
+
+    calculateVarSumKernel<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS),var);
+
+    cudaDeviceSynchronize();
+    cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
+
+    cudaFree(gpu_data);
+    cudaFree(gpu_result);
+
+    if (var==0) globalCalculationInfo.sumY=sum;
+    if (var==1) globalCalculationInfo.sumX1=sum;
+    if (var==2) globalCalculationInfo.sumX2=sum;
+    return 0;
+}
+
+int calculateBetas(){
+    double x1=globalCalculationInfo.sumSquaredX1-(pow(globalCalculationInfo.sumX1,2)/numObservations);
+    double x2=globalCalculationInfo.sumSquaredX2-(pow(globalCalculationInfo.sumX2,2)/numObservations);
+    double x1y=globalCalculationInfo.sumX1Y-(globalCalculationInfo.sumX1*globalCalculationInfo.sumY)/numObservations;
+    double x2y=globalCalculationInfo.sumX2Y-(globalCalculationInfo.sumX2*globalCalculationInfo.sumY)/numObservations;
+    double x1x2=globalCalculationInfo.sumX1X2-(globalCalculationInfo.sumX1*globalCalculationInfo.sumX2)/numObservations;
+
+    globalRegressionInfo.beta_1=((x2*x1y)-(x1x2*x2y))/((x1*x2)-pow(x1x2,2));
+    globalRegressionInfo.beta_2=((x1*x2y)-(x1x2*x1y))/((x1*x2)-pow(x1x2,2));
+
+    globalRegressionInfo.beta_0=(globalCalculationInfo.sumY/numObservations)-
+                                (globalRegressionInfo.beta_1*(globalCalculationInfo.sumX1/numObservations))-
+                                (globalRegressionInfo.beta_2*(globalCalculationInfo.sumX2/numObservations));
+
+    return 0;  
+}
+
 int runRegression(){
     calculateVarSquared(1);
     calculateVarSquared(2);
     calculateSumOfProductSquared(0,1);
     calculateSumOfProductSquared(0,2);
     calculateSumOfProductSquared(1,2);
-
+    calculateVarSum(0);
+    calculateVarSum(1);
+    calculateVarSum(2);
+    calculateBetas();
     return 1;
 }
 
-
 int executeCommand(char command[]) {
     // exit
-    if (strcmp(command, "exit") == 0) {
+    if (strcmp(command, "e") == 0) {
         printf("Exiting program\n");
         return -1;
     }
