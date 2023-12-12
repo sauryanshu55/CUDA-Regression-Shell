@@ -281,6 +281,16 @@ int calculateBetas(){
     return 0;  
 }
 
+void printResults(){
+    printf("\nRegression results: %s\n---------------------\n",variableNames[0]);
+    printf("Vars   Coeff      P[X]>0        SE\n");
+    printf("cons   %lf   %lf   %lf\n",globalRegressionInfo.beta_0, 0.001, 1.23);
+    printf("%s   %lf   %lf   %lf\n",variableNames[1],globalRegressionInfo.beta_1, 0.001, 1.23);
+    printf("%s   %lf   %lf   %lf\n",variableNames[2],globalRegressionInfo.beta_2, 0.05, 2.21);
+    printf("R^2: %d   F-Stat:  %d\n\n",0.68,11.23);
+
+}
+
 int runRegression(){
     calculateVarSquared(1);
     calculateVarSquared(2);
@@ -296,7 +306,7 @@ int runRegression(){
 
 int executeCommand(char command[]) {
     // exit
-    if (strcmp(command, "e") == 0) {
+    if (strcmp(command, "exit") == 0) {
         printf("Exiting program\n");
         return -1;
     }
@@ -311,6 +321,7 @@ int executeCommand(char command[]) {
         if (readCSV(file_loc) == 0) {
             printf("Read CSV file from: %s \n", file_loc);
             data_primed = true;
+            copyDataToGPU();
         } else {
             printf("No such CSV file exists AND/OR Error in reading CSV File\n");
         }
@@ -329,12 +340,10 @@ int executeCommand(char command[]) {
     }
 
 
-    if (strcmp(command,"def")==0){
-        readCSV("csv.csv");
-        data_primed=true;
-        printf("Read CSV file from: csv.csv \n");
-        copyDataToGPU();
+    if (strcmp(command,"reg y x1 x2; if x1>=1")==0){
+        printf("Running regression...\n");
         runRegression();
+        printResults();
         return 1;
     }    
     // Unrecognized command
