@@ -3,57 +3,34 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cuda_runtime.h>
+#include "kernels.cuh"
+#include "regression_info.cuh"
 
 #define MAX_VARIABLES 3
 #define MAX_DATA_POINTS 1000
 #define MAX_VARIABLE_NAME_LENGTH 50
 #define MAX_COMMAND_LENGTH 100
 
-// Global array to store data
-int data[MAX_VARIABLES * MAX_DATA_POINTS];
+data_t Data;
 
-int data_cpy[MAX_VARIABLES * MAX_DATA_POINTS];
-
-// Array to store variable names
-char variableNames[MAX_VARIABLES][256];
-
-int numVars;
-int numObservations;
 bool data_primed = false;
 
-
-typedef struct calculationInfo_t{
-    int sumSquaredX1;
-    int sumSquaredX2;
-    int sumX1X2;
-    int sumX1Y;
-    int sumX2Y;
-    int sumX1;
-    int sumX2;
-    int sumY;
-} calculationInfo_t;
-
-typedef struct regressionInfo_t{
-    double beta_0;
-    double beta_1;
-    double beta_2;
-} regressionInfo_t;
 
 calculationInfo_t globalCalculationInfo;
 regressionInfo_t globalRegressionInfo;
 
 // Function to print the imported data
-void printCSVData(int* data_to_copy) {
+void printCSVData(int* data) {
     printf("Variable Names:\n");
-    for (int i = 0; i < numVars; i++) {
-        printf("%s\t", variableNames[i]);
+    for (int i = 0; i < Data.numVars; i++) {
+        printf("%s\t", Data.variableNames[i]);
     }
 
     printf("\n");
 
-    for (int j = 0; j < numObservations; j++) {
-        for (int i = 0; i < numVars; i++) {
-            printf("%d\t", data_to_copy[j * numVars + i]);
+    for (int j = 0; j < Data.numObservations; j++) {
+        for (int i = 0; i < Data.numVars; i++) {
+            printf("%d\t", data[j * Data.numVars + i]);
         }
         printf("\n");
     }
@@ -76,15 +53,15 @@ int readCSV(const char *filename) {
 
         while (token != NULL && variableIndex < MAX_VARIABLES) {
             // Remove leading and trailing whitespaces
-            sscanf(token, " %[^ \t\n]", variableNames[variableIndex]);
+            sscanf(token, " %[^ \t\n]", Data.variableNames[variableIndex]);
 
             // Print variable names if needed
-            // printf("Variable %d: %s\n", variableIndex + 1, variableNames[variableIndex]);
+            // printf("Variable %d: %s\n", variableIndex + 1, Data.variableNames[variableIndex]);
 
             token = strtok(NULL, ",");
             variableIndex++;
         }
-        numVars = variableIndex;
+        Data.numVars = variableIndex;
     }
 
     // Read the rest of the file to get numerical data
@@ -94,10 +71,10 @@ int readCSV(const char *filename) {
         int variableIndex = 0;
 
         while (token != NULL && variableIndex < MAX_VARIABLES) {
-            sscanf(token, " %d", &data[dataPointIndex * numVars + variableIndex]);
+            sscanf(token, " %d", &Data.data[dataPointIndex * Data.numVars + variableIndex]);
 
             // Print data if needed
-            // printf("%s: %d\n", variableNames[variableIndex], data[dataPointIndex * numVars + variableIndex]);
+            // printf("%s: %d\n", Data.variableNames[variableIndex], data[dataPointIndex * Data.numVars + variableIndex]);
 
             token = strtok(NULL, ",");
             variableIndex++;
@@ -105,20 +82,10 @@ int readCSV(const char *filename) {
 
         dataPointIndex++;
     }
-    numObservations = dataPointIndex;
+    Data.numObservations = dataPointIndex;
 
     fclose(file);
     return 0;
-}
-
-// CUDA kernel to copy array from device to device
-__global__ void copyArrayKernel(int *data, int *data_copy, int size) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // Check for valid thread index
-    if (tid < size) {
-        data_copy[tid] = data[tid];
-    }
 }
 
 
@@ -128,7 +95,7 @@ int copyDataToGPU(){
     cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
     cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
 
-    cudaMemcpy(gpu_data,data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    cudaMemcpy(gpu_data,Data.data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
@@ -137,23 +104,12 @@ int copyDataToGPU(){
     
     cudaDeviceSynchronize();
 
-    cudaMemcpy(data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+    cudaMemcpy(Data.data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
     
     // printCSVData(data_cpy);
     cudaFree(gpu_data);
     cudaFree(gpu_data_cpy);
     return 1;
-}
-
-__global__ void calculateSquareKernel(int* data, int* sum, int size,int xvar){
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int index=3*tid+xvar;
-    
-    if (index<size){
-        // sum+=data[index]*data[index];
-        atomicAdd(sum,data[index]*data[index]);
-    }
 }
 
 int calculateVarSquared(int xvar){
@@ -162,7 +118,7 @@ int calculateVarSquared(int xvar){
     int sum=0;
 
     cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    cudaMemcpy(gpu_data,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
     cudaMalloc((void**)&gpu_result,sizeof(int));
     cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice);
@@ -184,24 +140,13 @@ int calculateVarSquared(int xvar){
     return 0;
 }
 
-__global__ void calculateSumOfProductSquaredKernel(int* data, int* sum, int size,int var1,int var2){
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int firstIndex=3*tid+var1;
-    int secondIndex=3*tid+var2;
-
-    if ((firstIndex<size)||(secondIndex<size)){
-        atomicAdd(sum,data[firstIndex]*data[secondIndex]);
-    }
-}
-
 
 int calculateSumOfProductSquared(int var1, int var2){
     int *gpuData,*gpuResult;
     int sum=0;
 
     cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpuData,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
     cudaMalloc((void**)&gpuResult,sizeof(int));
     cudaMemcpy(gpuResult,&sum,sizeof(int),cudaMemcpyHostToDevice);
@@ -225,24 +170,13 @@ int calculateSumOfProductSquared(int var1, int var2){
     return 0;
 }
 
-__global__ void calculateVarSumKernel(int* data, int* sum, int size,int var){
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int index=3*tid+var;
-
-    if (index<size){
-        // sum+=data[index]*data[index];
-        atomicAdd(sum,data[index]);
-    }
-}
-
 int calculateVarSum(int var){
     int *gpu_data;
     int *gpu_result;
     int sum=0;
 
     cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpu_data,data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    cudaMemcpy(gpu_data,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
     cudaMalloc((void**)&gpu_result,sizeof(int));
     cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice);
@@ -264,34 +198,27 @@ int calculateVarSum(int var){
     return 0;
 }
 
+
 int calculateBetas(){
-    double x1=globalCalculationInfo.sumSquaredX1-(pow(globalCalculationInfo.sumX1,2)/numObservations);
-    double x2=globalCalculationInfo.sumSquaredX2-(pow(globalCalculationInfo.sumX2,2)/numObservations);
-    double x1y=globalCalculationInfo.sumX1Y-(globalCalculationInfo.sumX1*globalCalculationInfo.sumY)/numObservations;
-    double x2y=globalCalculationInfo.sumX2Y-(globalCalculationInfo.sumX2*globalCalculationInfo.sumY)/numObservations;
-    double x1x2=globalCalculationInfo.sumX1X2-(globalCalculationInfo.sumX1*globalCalculationInfo.sumX2)/numObservations;
+    double x1=globalCalculationInfo.sumSquaredX1-(pow(globalCalculationInfo.sumX1,2)/Data.numObservations);
+    double x2=globalCalculationInfo.sumSquaredX2-(pow(globalCalculationInfo.sumX2,2)/Data.numObservations);
+    double x1y=globalCalculationInfo.sumX1Y-(globalCalculationInfo.sumX1*globalCalculationInfo.sumY)/Data.numObservations;
+    double x2y=globalCalculationInfo.sumX2Y-(globalCalculationInfo.sumX2*globalCalculationInfo.sumY)/Data.numObservations;
+    double x1x2=globalCalculationInfo.sumX1X2-(globalCalculationInfo.sumX1*globalCalculationInfo.sumX2)/Data.numObservations;
 
     globalRegressionInfo.beta_1=((x2*x1y)-(x1x2*x2y))/((x1*x2)-pow(x1x2,2));
     globalRegressionInfo.beta_2=((x1*x2y)-(x1x2*x1y))/((x1*x2)-pow(x1x2,2));
 
-    globalRegressionInfo.beta_0=(globalCalculationInfo.sumY/numObservations)-
-                                (globalRegressionInfo.beta_1*(globalCalculationInfo.sumX1/numObservations))-
-                                (globalRegressionInfo.beta_2*(globalCalculationInfo.sumX2/numObservations));
+    globalRegressionInfo.beta_0=(globalCalculationInfo.sumY/Data.numObservations)-
+                                (globalRegressionInfo.beta_1*(globalCalculationInfo.sumX1/Data.numObservations))-
+                                (globalRegressionInfo.beta_2*(globalCalculationInfo.sumX2/Data.numObservations));
 
     return 0;  
 }
 
-void printResults(){
-    printf("\nRegression results: %s\n---------------------\n",variableNames[0]);
-    printf("Vars   Coeff      P[X]>0        SE\n");
-    printf("cons   %lf   %lf   %lf\n",globalRegressionInfo.beta_0, 0.001, 1.23);
-    printf("%s   %lf   %lf   %lf\n",variableNames[1],globalRegressionInfo.beta_1, 0.001, 1.23);
-    printf("%s   %lf   %lf   %lf\n",variableNames[2],globalRegressionInfo.beta_2, 0.05, 2.21);
-    printf("R^2: %d   F-Stat:  %d\n\n",0.68,11.23);
-
-}
 
 int runRegression(){
+    printf("Running Regression...\n");
     calculateVarSquared(1);
     calculateVarSquared(2);
     calculateSumOfProductSquared(0,1);
@@ -306,7 +233,7 @@ int runRegression(){
 
 int executeCommand(char command[]) {
     // exit
-    if (strcmp(command, "exit") == 0) {
+    if (strcmp(command, "e") == 0) {
         printf("Exiting program\n");
         return -1;
     }
@@ -331,8 +258,8 @@ int executeCommand(char command[]) {
     // view
     if (strcmp(command, "view") == 0) {
         if (data_primed) {
-            printCSVData(data);
-            printf("Number of vars: %d\nNumber of observations: %d\n",numVars,numObservations);
+            printCSVData(Data.data);
+            printf("Number of vars: %d\nNumber of observations: %d\n",Data.numVars,Data.numObservations);
         } else {
             printf("Data is not loaded yet\n");
         }
@@ -340,10 +267,14 @@ int executeCommand(char command[]) {
     }
 
 
-    if (strcmp(command,"reg y x1 x2; if x1>=1")==0){
-        printf("Running regression...\n");
+    if (strcmp(command,"def")==0){
+        data_primed=true;
+        readCSV("csv.csv");
+        copyDataToGPU();
         runRegression();
-        printResults();
+        printf("%lf\n",globalRegressionInfo.beta_0);
+        printf("%lf\n",globalRegressionInfo.beta_1);
+        printf("%lf\n",globalRegressionInfo.beta_2);
         return 1;
     }    
     // Unrecognized command
