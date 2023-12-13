@@ -4,55 +4,7 @@
 #include <string.h>
 #include <cuda_runtime.h>
 
-// CUDA kernel to copy array from device to device
-__global__ void copyArrayKernel(int *data, int *data_copy, int size) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // Check for valid thread index
-    if (tid < size) {
-        data_copy[tid] = data[tid];
-    }
-    __syncthreads();
-}
-
-__global__ void calculateSquareKernel(int* data, int* sum, int size,int xvar){
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int index=3*tid+xvar;
-    
-    if (index<size){
-        atomicAdd(sum,data[index]*data[index]);
-    }
-    __syncthreads();
-}
-
-
-__global__ void calculateSumOfProductSquaredKernel(int* data, int* sum, int size,int var1,int var2){
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int firstIndex=3*tid+var1;
-    int secondIndex=3*tid+var2;
-
-    if ((firstIndex<size)||(secondIndex<size)){
-        atomicAdd(sum,data[firstIndex]*data[secondIndex]);
-    }
-    __syncthreads();
-}
-
-
-__global__ void calculateVarSumKernel(int* data, int* sum, int size,int var){
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int index=3*tid+var;
-
-    if (index<size){
-        // sum+=data[index]*data[index];
-        atomicAdd(sum,data[index]);
-    }
-    __syncthreads();
-}
-
-__global__ void predictModelKernel(int *data, int *predictions,int* residuals, double beta_0, double beta_1,double beta_2, int MAX_VARIABLES, int numObservations){
+__global__ void predictModelKernel(int *data, double *predictions,double* residuals, double beta_0, double beta_1,double beta_2, int MAX_VARIABLES, int numObservations){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (tid < numObservations) {
@@ -69,5 +21,48 @@ __global__ void predictModelKernel(int *data, int *predictions,int* residuals, d
         residuals[tid]=y-predictions[tid];
     }
     
-    __syncthreads();
+}
+
+// CUDA kernel to copy array from device to device
+__global__ void copyArrayKernel(int *data, int *data_copy, int size) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Check for valid thread index
+    if (tid < size) {
+        data_copy[tid] = data[tid];
+    }
+}
+
+__global__ void calculateSquareKernel(int* data, int* sum, int size,int xvar){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int index=3*tid+xvar;
+    
+    if (index<size){
+        atomicAdd(sum,data[index]*data[index]);
+    }
+}
+
+
+__global__ void calculateSumOfProductSquaredKernel(int* data, int* sum, int size,int var1,int var2){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int firstIndex=3*tid+var1;
+    int secondIndex=3*tid+var2;
+
+    if ((firstIndex<size)||(secondIndex<size)){
+        atomicAdd(sum,data[firstIndex]*data[secondIndex]);
+    }
+}
+
+
+__global__ void calculateVarSumKernel(int* data, int* sum, int size,int var){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int index=3*tid+var;
+
+    if (index<size){
+        // sum+=data[index]*data[index];
+        atomicAdd(sum,data[index]);
+    }
 }

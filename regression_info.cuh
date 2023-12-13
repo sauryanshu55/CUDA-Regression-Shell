@@ -4,7 +4,7 @@
 #define MAX_COMMAND_LENGTH 100
 
 typedef struct calculationInfo_t{
-    int residuals[MAX_VARIABLES * MAX_DATA_POINTS];
+    double residuals[MAX_VARIABLES * MAX_DATA_POINTS];
     int sumSquaredX1;
     int sumSquaredX2;
     int sumX1X2;
@@ -28,5 +28,5 @@ typedef struct data_t{
     int numVars;
     int numObservations;
     
-    int predictions[MAX_VARIABLES * MAX_DATA_POINTS];
+    double predictions[MAX_VARIABLES * MAX_DATA_POINTS];
 } data_t;
