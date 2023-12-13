@@ -12,9 +12,7 @@
 #define MAX_COMMAND_LENGTH 100
 
 data_t Data;
-
 bool data_primed = false;
-
 
 calculationInfo_t globalCalculationInfo;
 regressionInfo_t globalRegressionInfo;
@@ -216,6 +214,27 @@ int calculateBetas(){
     return 0;  
 }
 
+int predictModel(){
+    int *gpuData,*gpuPredictions,*gpuResiduals;
+
+    cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMalloc((void**)&gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+
+    cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
+
+    predictModelKernel<<<gridSize,blockSize>>>(gpuData,gpuPredictions,gpuResiduals,globalRegressionInfo.beta_0,globalRegressionInfo.beta_1,globalRegressionInfo.beta_2,MAX_VARIABLES,Data.numObservations);
+
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(Data.predictions,gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+    cudaMemcpy(globalCalculationInfo.residuals,gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+    
+    return 0;
+}
 
 int runRegression(){
     printf("Running Regression...\n");
@@ -228,6 +247,7 @@ int runRegression(){
     calculateVarSum(1);
     calculateVarSum(2);
     calculateBetas();
+    predictModel();
     return 1;
 }
 
@@ -272,9 +292,6 @@ int executeCommand(char command[]) {
         readCSV("csv.csv");
         copyDataToGPU();
         runRegression();
-        printf("%lf\n",globalRegressionInfo.beta_0);
-        printf("%lf\n",globalRegressionInfo.beta_1);
-        printf("%lf\n",globalRegressionInfo.beta_2);
         return 1;
     }    
     // Unrecognized command

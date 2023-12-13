@@ -51,3 +51,23 @@ __global__ void calculateVarSumKernel(int* data, int* sum, int size,int var){
     }
     __syncthreads();
 }
+
+__global__ void predictModelKernel(int *data, int *predictions,int* residuals, double beta_0, double beta_1,double beta_2, int MAX_VARIABLES, int numObservations){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (tid < numObservations) {
+        int offset = tid * MAX_VARIABLES;
+
+        // Extract variables for the observation
+        int y = data[offset];
+        int x1 = data[offset + 1];
+        int x2 = data[offset + 2];
+
+        // Calculate the prediction using the provided beta coefficients
+        predictions[tid] = beta_0 + beta_1 * x1 + beta_2 * x2;
+        __syncthreads();
+        residuals[tid]=y-predictions[tid];
+    }
+    
+    __syncthreads();
+}
