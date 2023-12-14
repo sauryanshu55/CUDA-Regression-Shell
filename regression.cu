@@ -15,7 +15,8 @@ data_t Data;
 bool data_primed = false;
 
 calculationInfo_t globalCalculationInfo;
-regressionInfo_t globalRegressionInfo;
+betaCoefficients_t betaCoefficients;
+standardErrors_t standardErrors;
 
 // Function to print the imported data
 void printCSVData(int* data) {
@@ -215,29 +216,60 @@ int calculateVarSum(int var){
 
 int predictModel(){
     int *gpuData;
-    double *gpuPredictions,*gpuResiduals;
+    int *gpuPredictions;
+    int *gpuResiduals;
 
     cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMalloc((void**)&gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
-    cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double));
+    cudaMalloc((void**)&gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
 
     cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
-    predictModelKernel<<<gridSize,blockSize>>>(gpuData,gpuPredictions,gpuResiduals,globalRegressionInfo.beta_0,globalRegressionInfo.beta_1,globalRegressionInfo.beta_2,MAX_VARIABLES,Data.numObservations);
+    predictModelKernel<<<gridSize,blockSize>>>(gpuData,gpuPredictions,gpuResiduals,betaCoefficients.beta_0,betaCoefficients.beta_1,betaCoefficients.beta_2,MAX_VARIABLES,Data.numObservations);
 
     cudaDeviceSynchronize();
 
-    cudaMemcpy(Data.predictions,gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyDeviceToHost);
-    cudaMemcpy(globalCalculationInfo.residuals,gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(double),cudaMemcpyDeviceToHost);
+    cudaMemcpy(Data.predictions,gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+    cudaMemcpy(globalCalculationInfo.residuals,gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+    
+
+    cudaFree(gpuData);
+    cudaFree(gpuPredictions);
+    cudaFree(gpuResiduals);
     return 0;
 }
 
 int calculateStandardErrors(){
+    int *gpuResiduals, *gpuResidualSum;
+    int *gpuVarianceArr;
+
+    int sum=0;
+
+    cudaMalloc((void**)&gpuResiduals,(Data.numObservations*Data.numVars)*sizeof(int));
+    cudaMemcpy(gpuResiduals,globalCalculationInfo.residuals,(Data.numObservations*Data.numVars)*sizeof(int),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpuResidualSum,sizeof(int));
+    cudaMemcpy(gpuResidualSum,&sum,sizeof(int),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpuVarianceArr,(Data.numObservations*Data.numVars)*sizeof(int));
+
+    int blockSize = 256;
+    int gridSize = ((Data.numObservations*Data.numVars)+ blockSize - 1) / blockSize;
+
+    calculateStandardErrorsKernel<<<gridSize,blockSize>>>(gpuResiduals,gpuResidualSum,gpuVarianceArr,Data.numObservations,(MAX_VARIABLES*MAX_DATA_POINTS));
+
+    cudaDeviceSynchronize();
+    cudaMemcpy(&sum,gpuResidualSum,sizeof(int),cudaMemcpyDeviceToHost);
+
+    cudaFree(gpuResidualSum);
+    cudaFree(gpuResiduals);
+
     return 0;
 }
+
 int calculateBetas(){
     double x1=globalCalculationInfo.sumSquaredX1-(pow(globalCalculationInfo.sumX1,2)/Data.numObservations);
     double x2=globalCalculationInfo.sumSquaredX2-(pow(globalCalculationInfo.sumX2,2)/Data.numObservations);
@@ -245,12 +277,12 @@ int calculateBetas(){
     double x2y=globalCalculationInfo.sumX2Y-(globalCalculationInfo.sumX2*globalCalculationInfo.sumY)/Data.numObservations;
     double x1x2=globalCalculationInfo.sumX1X2-(globalCalculationInfo.sumX1*globalCalculationInfo.sumX2)/Data.numObservations;
 
-    globalRegressionInfo.beta_1=((x2*x1y)-(x1x2*x2y))/((x1*x2)-pow(x1x2,2));
-    globalRegressionInfo.beta_2=((x1*x2y)-(x1x2*x1y))/((x1*x2)-pow(x1x2,2));
+    betaCoefficients.beta_1=((x2*x1y)-(x1x2*x2y))/((x1*x2)-pow(x1x2,2));
+    betaCoefficients.beta_2=((x1*x2y)-(x1x2*x1y))/((x1*x2)-pow(x1x2,2));
 
-    globalRegressionInfo.beta_0=(globalCalculationInfo.sumY/Data.numObservations)-
-                                (globalRegressionInfo.beta_1*(globalCalculationInfo.sumX1/Data.numObservations))-
-                                (globalRegressionInfo.beta_2*(globalCalculationInfo.sumX2/Data.numObservations));
+    betaCoefficients.beta_0=(globalCalculationInfo.sumY/Data.numObservations)-
+                                (betaCoefficients.beta_1*(globalCalculationInfo.sumX1/Data.numObservations))-
+                                (betaCoefficients.beta_2*(globalCalculationInfo.sumX2/Data.numObservations));
 
     return 0;  
 }
@@ -267,6 +299,7 @@ int runRegression(){
     calculateVarSum(2);
     calculateBetas();
     predictModel();
+    calculateStandardErrors();
     return 1;
 }
 

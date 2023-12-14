@@ -3,8 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cuda_runtime.h>
+#include <cmath>
 
-__global__ void predictModelKernel(int *data, double *predictions,double* residuals, double beta_0, double beta_1,double beta_2, int MAX_VARIABLES, int numObservations){
+__global__ void predictModelKernel(int *data, int *predictions,int* residuals, double beta_0, double beta_1,double beta_2, int MAX_VARIABLES, int numObservations){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (tid < numObservations) {
@@ -17,10 +18,32 @@ __global__ void predictModelKernel(int *data, double *predictions,double* residu
 
         // Calculate the prediction using the provided beta coefficients
         predictions[tid] = beta_0 + beta_1 * x1 + beta_2 * x2;
+
         __syncthreads();
+
         residuals[tid]=y-predictions[tid];
     }
     
+}
+
+__global__ void calculateStandardErrorsKernel(int *residuals, int *residualSum, int *varianceArr,int degreesOfFreedom, int size){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (tid<size){
+        atomicAdd(residualSum,residuals[tid]);
+    
+    
+        __syncthreads();
+        double mean=(double)residualSum[0]/(double)degreesOfFreedom;
+
+        atomicAdd(varianceArr,(int)pow((double)residuals[tid]-mean,2));
+
+        __syncthreads();
+
+        double residualVariance= std::fma((double)varianceArr[0],1.0/(degreesOfFreedom-1),0.0);
+        // fucking todo
+    }
+
 }
 
 // CUDA kernel to copy array from device to device
