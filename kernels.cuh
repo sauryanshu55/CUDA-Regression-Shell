@@ -34,6 +34,7 @@ __global__ void calculateStandardErrorsKernel(int *residuals, int *residualSum, 
     
     
         __syncthreads();
+
         double mean=(double)residualSum[0]/(double)degreesOfFreedom;
 
         atomicAdd(varianceArr,(int)pow((double)residuals[tid]-mean,2));
@@ -55,7 +56,9 @@ __global__ void calculateVarVarianceKernel(int *data, int *numeratorSumArr, doub
 
     }
     __syncthreads();
+
     *varVariance= std::fma((double)numeratorSumArr[0],1.0/(degreesOfFreedom-1),0.0);
+    
     __syncthreads();
 }
 

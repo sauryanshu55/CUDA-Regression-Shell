@@ -37,23 +37,6 @@ void printCSVData(int* data) {
     }
 }
 
-// Function to print the imported data
-void printCSVData_d(double* data) {
-    printf("Variable Names:\n");
-    for (int i = 0; i < Data.numVars; i++) {
-        printf("%s\t", Data.variableNames[i]);
-    }
-
-    printf("\n");
-
-    for (int j = 0; j < Data.numObservations; j++) {
-        for (int i = 0; i < Data.numVars; i++) {
-            printf("%lf\t", data[j * Data.numVars + i]);
-        }
-        printf("\n");
-    }
-}
-
 // Function to read CSV file and initialize data array
 int readCSV(const char *filename) {
     FILE *file = fopen(filename, "r");
@@ -324,20 +307,32 @@ int calculateVarVariance(int var){
 }
 
 int calculateBetas(){
-    double x1=globalCalculationInfo.sumSquaredX1-(pow(globalCalculationInfo.sumX1,2)/Data.numObservations);
-    double x2=globalCalculationInfo.sumSquaredX2-(pow(globalCalculationInfo.sumX2,2)/Data.numObservations);
-    double x1y=globalCalculationInfo.sumX1Y-(globalCalculationInfo.sumX1*globalCalculationInfo.sumY)/Data.numObservations;
-    double x2y=globalCalculationInfo.sumX2Y-(globalCalculationInfo.sumX2*globalCalculationInfo.sumY)/Data.numObservations;
-    double x1x2=globalCalculationInfo.sumX1X2-(globalCalculationInfo.sumX1*globalCalculationInfo.sumX2)/Data.numObservations;
+    calculationInfo_t cInfo=globalCalculationInfo;
+
+    double x1=cInfo.sumSquaredX1-(pow(cInfo.sumX1,2)/Data.numObservations);
+    double x2=cInfo.sumSquaredX2-(pow(cInfo.sumX2,2)/Data.numObservations);
+    double x1y=cInfo.sumX1Y-(cInfo.sumX1*cInfo.sumY)/Data.numObservations;
+    double x2y=cInfo.sumX2Y-(cInfo.sumX2*cInfo.sumY)/Data.numObservations;
+    double x1x2=cInfo.sumX1X2-(cInfo.sumX1*cInfo.sumX2)/Data.numObservations;
 
     betaCoefficients.beta_1=((x2*x1y)-(x1x2*x2y))/((x1*x2)-pow(x1x2,2));
     betaCoefficients.beta_2=((x1*x2y)-(x1x2*x1y))/((x1*x2)-pow(x1x2,2));
 
-    betaCoefficients.beta_0=(globalCalculationInfo.sumY/Data.numObservations)-
-                                (betaCoefficients.beta_1*(globalCalculationInfo.sumX1/Data.numObservations))-
-                                (betaCoefficients.beta_2*(globalCalculationInfo.sumX2/Data.numObservations));
+    betaCoefficients.beta_0=(cInfo.sumY/Data.numObservations)-
+                                (betaCoefficients.beta_1*(cInfo.sumX1/Data.numObservations))-
+                                (betaCoefficients.beta_2*(cInfo.sumX2/Data.numObservations));
 
     return 0;  
+}
+
+int printRegressionResults(){
+    char boundary[50]="-------------------------------------------";
+    printf("\nOutput: %s\n%s\n",Data.variableNames[0],boundary);
+    printf("Var         Coeff         Variance         StdErr\n %s\n",boundary);
+    printf("cons    %lf    %lf    %lf\n",betaCoefficients.beta_0,globalCalculationInfo.varianceY,standardErrors.beta_0_stderr);
+    printf("%s      %lf    %lf    %lf\n",Data.variableNames[1],betaCoefficients.beta_1,globalCalculationInfo.varianceX1,standardErrors.beta_1_stderr);
+    printf("%s      %lf    %lf    %lf\n\n",Data.variableNames[2],betaCoefficients.beta_2,globalCalculationInfo.varianceX2,standardErrors.beta_2_stderr);
+    return 0;
 }
 
 int runRegression(){
@@ -363,23 +358,12 @@ int runRegression(){
     calculateVarVariance(1);
     calculateVarVariance(2);
 
-    printf("wtf %lf\n",globalCalculationInfo.varianceX1);
-
     standardErrors.beta_0_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceY);
-    // printf("Standard error: %lf\n",standardErrors.beta_0_stderr);
-
     standardErrors.beta_1_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceX1);
-    // printf("Standard error: %lf\n",standardErrors.beta_1_stderr);
-
     standardErrors.beta_2_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceX2);
-    // printf("Standard error: %lf\n",standardErrors.beta_2_stderr);
-    
-    // printf("sqrt(%lf x %lf) = %lf\n",globalCalculationInfo.residualVariance,globalCalculationInfo.varianceY,standardErrors.beta_0_stderr);
-    // printf("sqrt(%lf x %lf) = %lf\n",globalCalculationInfo.residualVariance,globalCalculationInfo.varianceX1,standardErrors.beta_1_stderr);
-    // printf("sqrt(%lf x %lf) = %lf\n",globalCalculationInfo.residualVariance,globalCalculationInfo.varianceX2,standardErrors.beta_2_stderr);
 
 
-
+    printRegressionResults();
     return 1;
 }
 
