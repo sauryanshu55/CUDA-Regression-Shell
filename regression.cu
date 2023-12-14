@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cuda_runtime.h>
+#include<unistd.h>
+#include <math.h>
 #include "kernels.cuh"
 #include "regression_info.cuh"
 
@@ -246,26 +248,77 @@ int calculateStandardErrors(){
     int *gpuResiduals, *gpuResidualSum;
     int *gpuVarianceArr;
 
+    double *gpuVarianceResiduals;
+    double varianceResiduals =0;
+
     int sum=0;
 
-    cudaMalloc((void**)&gpuResiduals,(Data.numObservations*Data.numVars)*sizeof(int));
-    cudaMemcpy(gpuResiduals,globalCalculationInfo.residuals,(Data.numObservations*Data.numVars)*sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&gpuVarianceResiduals,sizeof(double));
+    cudaMemcpy(gpuVarianceResiduals,&varianceResiduals,sizeof(double),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMemcpy(gpuResiduals,globalCalculationInfo.residuals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
 
     cudaMalloc((void**)&gpuResidualSum,sizeof(int));
     cudaMemcpy(gpuResidualSum,&sum,sizeof(int),cudaMemcpyHostToDevice);
 
-    cudaMalloc((void**)&gpuVarianceArr,(Data.numObservations*Data.numVars)*sizeof(int));
+    cudaMalloc((void**)&gpuVarianceArr,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
 
     int blockSize = 256;
-    int gridSize = ((Data.numObservations*Data.numVars)+ blockSize - 1) / blockSize;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
-    calculateStandardErrorsKernel<<<gridSize,blockSize>>>(gpuResiduals,gpuResidualSum,gpuVarianceArr,Data.numObservations,(MAX_VARIABLES*MAX_DATA_POINTS));
+    calculateStandardErrorsKernel<<<gridSize,blockSize>>>(gpuResiduals,gpuResidualSum,gpuVarianceArr,gpuVarianceResiduals,Data.numObservations,(MAX_VARIABLES*MAX_DATA_POINTS));
 
     cudaDeviceSynchronize();
     cudaMemcpy(&sum,gpuResidualSum,sizeof(int),cudaMemcpyDeviceToHost);
+    cudaMemcpy(&varianceResiduals,gpuVarianceResiduals,sizeof(double),cudaMemcpyDeviceToHost);
 
+    globalCalculationInfo.residualVariance=varianceResiduals;
+
+    cudaFree(gpuVarianceResiduals);
     cudaFree(gpuResidualSum);
     cudaFree(gpuResiduals);
+
+    return 0;
+}
+
+int calculateVarVariance(int var){
+    int *gpuData, *gpuNumeratorSumArr;
+    double *gpuVarVariance;
+
+    double variance=0;
+
+    cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpuVarVariance,sizeof(double));
+    cudaMemcpy(gpuVarVariance,&variance,sizeof(double),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**)&gpuNumeratorSumArr,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+
+    int blockSize = 256;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
+
+    int varMean = 0;
+    if (var==0) varMean=globalCalculationInfo.sumY/Data.numObservations;
+    if (var==1) varMean=globalCalculationInfo.sumX1/Data.numObservations;
+    if (var==2) varMean=globalCalculationInfo.sumX2/Data.numObservations;
+
+    calculateVarVarianceKernel<<<gridSize,blockSize>>>(gpuData,gpuNumeratorSumArr,gpuVarVariance,
+                                                        Data.numObservations,var,varMean,
+                                                        (MAX_VARIABLES*MAX_DATA_POINTS));
+
+    cudaDeviceSynchronize();
+    cudaMemcpy(&variance,gpuVarVariance,sizeof(double),cudaMemcpyDeviceToHost);
+
+
+    if (var==0) globalCalculationInfo.varianceY=variance;
+    if (var==1) globalCalculationInfo.varianceX1=variance;
+    if (var==2) globalCalculationInfo.varianceX2=variance;
+
+    cudaFree(gpuData);
+    cudaFree(&gpuNumeratorSumArr);
+    cudaFree(&gpuVarVariance);
 
     return 0;
 }
@@ -291,15 +344,42 @@ int runRegression(){
     printf("Running Regression...\n");
     calculateVarSquared(1);
     calculateVarSquared(2);
+
     calculateSumOfProductSquared(0,1);
     calculateSumOfProductSquared(0,2);
     calculateSumOfProductSquared(1,2);
+
     calculateVarSum(0);
     calculateVarSum(1);
     calculateVarSum(2);
+
     calculateBetas();
+
     predictModel();
+
     calculateStandardErrors();
+    
+    calculateVarVariance(0);
+    calculateVarVariance(1);
+    calculateVarVariance(2);
+
+    printf("wtf %lf\n",globalCalculationInfo.varianceX1);
+
+    standardErrors.beta_0_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceY);
+    // printf("Standard error: %lf\n",standardErrors.beta_0_stderr);
+
+    standardErrors.beta_1_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceX1);
+    // printf("Standard error: %lf\n",standardErrors.beta_1_stderr);
+
+    standardErrors.beta_2_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceX2);
+    // printf("Standard error: %lf\n",standardErrors.beta_2_stderr);
+    
+    // printf("sqrt(%lf x %lf) = %lf\n",globalCalculationInfo.residualVariance,globalCalculationInfo.varianceY,standardErrors.beta_0_stderr);
+    // printf("sqrt(%lf x %lf) = %lf\n",globalCalculationInfo.residualVariance,globalCalculationInfo.varianceX1,standardErrors.beta_1_stderr);
+    // printf("sqrt(%lf x %lf) = %lf\n",globalCalculationInfo.residualVariance,globalCalculationInfo.varianceX2,standardErrors.beta_2_stderr);
+
+
+
     return 1;
 }
 

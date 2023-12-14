@@ -13,6 +13,10 @@ typedef struct calculationInfo_t{
     int sumX1;
     int sumX2;
     int sumY;
+    double varianceY;
+    double varianceX1;
+    double varianceX2;
+    double residualVariance;
 } calculationInfo_t;
 
 typedef struct betaCoefficients_t{

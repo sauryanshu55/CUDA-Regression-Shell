@@ -26,7 +26,7 @@ __global__ void predictModelKernel(int *data, int *predictions,int* residuals, d
     
 }
 
-__global__ void calculateStandardErrorsKernel(int *residuals, int *residualSum, int *varianceArr,int degreesOfFreedom, int size){
+__global__ void calculateStandardErrorsKernel(int *residuals, int *residualSum, int *varianceArr,double *residualVariance, int degreesOfFreedom, int size){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (tid<size){
@@ -40,11 +40,25 @@ __global__ void calculateStandardErrorsKernel(int *residuals, int *residualSum, 
 
         __syncthreads();
 
-        double residualVariance= std::fma((double)varianceArr[0],1.0/(degreesOfFreedom-1),0.0);
-        // fucking todo
+         *residualVariance= std::fma((double)varianceArr[0],1.0/(degreesOfFreedom-1),0.0);
     }
 
 }
+
+__global__ void calculateVarVarianceKernel(int *data, int *numeratorSumArr, double *varVariance,int degreesOfFreedom, int var, int mean, int size){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int index=3*tid+var;
+    if (index<size){
+     
+        if (data[index] != 0) atomicAdd(numeratorSumArr,(int)pow((double)data[index]-(double)mean,2));
+
+    }
+    __syncthreads();
+    *varVariance= std::fma((double)numeratorSumArr[0],1.0/(degreesOfFreedom-1),0.0);
+    __syncthreads();
+}
+
 
 // CUDA kernel to copy array from device to device
 __global__ void copyArrayKernel(int *data, int *data_copy, int size) {
