@@ -41,3 +41,15 @@ typedef struct data_t{
     
     int predictions[MAX_VARIABLES * MAX_DATA_POINTS];
 } data_t;
+
+typedef struct pValues_t{
+    double beta_0_pVal;
+    double beta_1_pVal;
+    double beta_2_pVal;
+} pValues_t;
+
+typedef struct varIndex_t{
+    int zerothIndex;
+    int firstIndex;
+    int secondIndex;
+} varIndex_t;

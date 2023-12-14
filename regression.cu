@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include<unistd.h>
 #include <math.h>
+#include <gsl/gsl_cdf.h>
 #include "kernels.cuh"
 #include "regression_info.cuh"
 
@@ -19,6 +20,8 @@ bool data_primed = false;
 calculationInfo_t globalCalculationInfo;
 betaCoefficients_t betaCoefficients;
 standardErrors_t standardErrors;
+pValues_t pValues;
+varIndex_t indexes;
 
 // Function to print the imported data
 void printCSVData(int* data) {
@@ -108,6 +111,30 @@ int copyDataToGPU(){
     cudaMemcpy(Data.data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
     
     // printCSVData(data_cpy);
+    cudaFree(gpu_data);
+    cudaFree(gpu_data_cpy);
+    return 1;
+}
+
+int createdIndexedData(){
+    int *gpu_data, *gpu_data_cpy;
+    
+    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+
+    cudaMemcpy(gpu_data,Data.data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
+
+    createdIndexedDataKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,0,indexes.zerothIndex,(MAX_VARIABLES*MAX_DATA_POINTS));
+    createdIndexedDataKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,1,indexes.firstIndex,(MAX_VARIABLES*MAX_DATA_POINTS));
+    createdIndexedDataKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,2,indexes.secondIndex,(MAX_VARIABLES*MAX_DATA_POINTS));
+    
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(Data.data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+
     cudaFree(gpu_data);
     cudaFree(gpu_data_cpy);
     return 1;
@@ -325,13 +352,32 @@ int calculateBetas(){
     return 0;  
 }
 
+
+void calculatePValues(){
+    double t_Stat_beta_0=betaCoefficients.beta_0/standardErrors.beta_0_stderr;
+    double t_Stat_beta_1=betaCoefficients.beta_1/standardErrors.beta_1_stderr;
+    double t_Stat_beta_2=betaCoefficients.beta_0/standardErrors.beta_2_stderr;
+
+    int degreesOfFreedom=Data.numObservations-3;
+
+    pValues.beta_0_pVal=2*(1-gsl_cdf_tdist_P(fabs(t_Stat_beta_0),degreesOfFreedom));
+    pValues.beta_1_pVal=2*(1-gsl_cdf_tdist_P(fabs(t_Stat_beta_1),degreesOfFreedom));
+    pValues.beta_2_pVal=2*(1-gsl_cdf_tdist_P(fabs(t_Stat_beta_2),degreesOfFreedom));
+    
+}
+
+
 int printRegressionResults(){
-    char boundary[50]="-------------------------------------------";
-    printf("\nOutput: %s\n%s\n",Data.variableNames[0],boundary);
-    printf("Var         Coeff         Variance         StdErr\n %s\n",boundary);
-    printf("cons    %lf    %lf    %lf\n",betaCoefficients.beta_0,globalCalculationInfo.varianceY,standardErrors.beta_0_stderr);
-    printf("%s      %lf    %lf    %lf\n",Data.variableNames[1],betaCoefficients.beta_1,globalCalculationInfo.varianceX1,standardErrors.beta_1_stderr);
-    printf("%s      %lf    %lf    %lf\n\n",Data.variableNames[2],betaCoefficients.beta_2,globalCalculationInfo.varianceX2,standardErrors.beta_2_stderr);
+    size_t boundarySize=70;
+    char boundary[boundarySize];
+    memset(boundary,'-',boundarySize-1);
+    boundary[boundarySize-1]='\0';
+
+    printf("\nOutput: %s\n%s\n",Data.variableNames[indexes.zerothIndex],boundary);
+    printf("Var         Coeff         Variance         StdErr         P(|T|>t)\n %s\n",boundary);
+    printf("cons    %lf    %lf    %lf    %lf\n",betaCoefficients.beta_0,globalCalculationInfo.varianceY,standardErrors.beta_0_stderr,pValues.beta_0_pVal);
+    printf("%s      %lf    %lf    %lf    %lf\n",Data.variableNames[indexes.firstIndex],betaCoefficients.beta_1,globalCalculationInfo.varianceX1,standardErrors.beta_1_stderr,pValues.beta_1_pVal);
+    printf("%s      %lf    %lf    %lf    %lf\n\n",Data.variableNames[indexes.secondIndex],betaCoefficients.beta_2,globalCalculationInfo.varianceX2,standardErrors.beta_2_stderr,pValues.beta_2_pVal);
     return 0;
 }
 
@@ -362,9 +408,25 @@ int runRegression(){
     standardErrors.beta_1_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceX1);
     standardErrors.beta_2_stderr=sqrt(globalCalculationInfo.residualVariance*globalCalculationInfo.varianceX2);
 
+    calculatePValues();
 
     printRegressionResults();
     return 1;
+}
+
+void assignVariableIndexes(char* givenY, char*  givenX1, char* givenX2){
+
+    if (strcmp(Data.variableNames[0],givenY)==0) indexes.zerothIndex=0;
+    if (strcmp(Data.variableNames[1],givenY)==0) indexes.zerothIndex=1;
+    if (strcmp(Data.variableNames[2],givenY)==0) indexes.zerothIndex=2;
+
+    if (strcmp(Data.variableNames[0],givenX1)==0) indexes.firstIndex=0;
+    if (strcmp(Data.variableNames[1],givenX1)==0) indexes.firstIndex=1;
+    if (strcmp(Data.variableNames[2],givenX1)==0) indexes.firstIndex=2;
+
+    if (strcmp(Data.variableNames[0],givenX2)==0) indexes.secondIndex=0;
+    if (strcmp(Data.variableNames[1],givenX2)==0) indexes.secondIndex=1;
+    if (strcmp(Data.variableNames[2],givenX2)==0) indexes.secondIndex=2;
 }
 
 int executeCommand(char command[]) {
@@ -384,7 +446,6 @@ int executeCommand(char command[]) {
         if (readCSV(file_loc) == 0) {
             printf("Read CSV file from: %s \n", file_loc);
             data_primed = true;
-            copyDataToGPU();
         } else {
             printf("No such CSV file exists AND/OR Error in reading CSV File\n");
         }
@@ -403,13 +464,30 @@ int executeCommand(char command[]) {
     }
 
 
-    if (strcmp(command,"def")==0){
-        data_primed=true;
-        readCSV("csv.csv");
-        copyDataToGPU();
-        runRegression();
-        return 1;
-    }    
+    if (strncmp(command, "reg ", 4) == 0) {
+        if (data_primed){
+            char givenY[MAX_VARIABLE_NAME_LENGTH], givenX1[MAX_VARIABLE_NAME_LENGTH], givenX2[MAX_VARIABLE_NAME_LENGTH];  
+        // Extract the next three variables
+            int offset = 4;  // Skip the "reg " part
+            int count = sscanf(command + offset, "%49s %49s %49s", givenY, givenX1, givenX2);
+
+            if (count == 3) {
+                assignVariableIndexes(givenY, givenX1, givenX2);
+                createdIndexedData();
+                runRegression();
+                return 1;
+            } else {
+                // Invalid format
+                printf("Invalid command format.\n");
+                return 1;
+            }
+            } else {
+            // Conditions not met
+                printf("Invalid command format.\n");
+                return 1;
+            }
+
+    }
     // Unrecognized command
     return 0;
 }

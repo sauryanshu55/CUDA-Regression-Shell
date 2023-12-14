@@ -106,3 +106,15 @@ __global__ void calculateVarSumKernel(int* data, int* sum, int size,int var){
         atomicAdd(sum,data[index]);
     }
 }
+
+// CUDA kernel to copy array from device to device
+__global__ void createdIndexedDataKernel(int *data, int *data_copy,int indexToPut, int actualIndex, int size) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int index=3*tid+indexToPut;
+    int actual=3*tid+actualIndex;
+    // Check for valid thread index
+    if (index < size-3) {
+        data_copy[index] = data[actual];
+    }
+}
