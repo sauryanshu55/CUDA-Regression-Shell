@@ -20,7 +20,7 @@ We define wrappers for the parallel CUDA code, in kernels.cuh
 #include "regression_info.cuh"
 
 #define MAX_VARIABLES 3 //Max number of variables
-#define MAX_DATA_POINTS 1000 // Max number of data points
+#define MAX_DATA_POINTS 100000 // Max number of data points
 #define MAX_VARIABLE_NAME_LENGTH 50 //Max variable name length
 #define MAX_COMMAND_LENGTH 100 //maximum length of command
 

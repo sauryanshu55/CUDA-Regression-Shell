@@ -6,7 +6,7 @@ Define Structs used in regression.cu in this file
 --------------------------------------------------------------------------
 */
 #define MAX_VARIABLES 3
-#define MAX_DATA_POINTS 1000
+#define MAX_DATA_POINTS 100000
 #define MAX_VARIABLE_NAME_LENGTH 50
 #define MAX_COMMAND_LENGTH 100
 
