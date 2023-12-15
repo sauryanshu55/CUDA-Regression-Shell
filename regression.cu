@@ -30,6 +30,9 @@ data_t Data;
 // Indicates if data has been loaded from the csv file yet
 bool data_primed = false;
 
+// Indicates if there are regression models available, to export. If not, "export" command cant be used
+bool regression_primed=false;
+
 // Store Calc info (See struct comments)
 calculationInfo_t globalCalculationInfo;
 
@@ -619,9 +622,9 @@ int printRegressionResults(){
 
     printf("\nOutput: %s\n%s\n",Data.variableNames[indexes.zerothIndex],boundary);
     printf("Var         Coeff         Variance         StdErr         P(|T|>t)\n %s\n",boundary);
-    printf("cons    %lf    %lf    %lf    %lf\n",betaCoefficients.beta_0,globalCalculationInfo.varianceY,standardErrors.beta_0_stderr,pValues.beta_0_pVal);
-    printf("%s      %lf    %lf    %lf    %lf\n",Data.variableNames[indexes.firstIndex],betaCoefficients.beta_1,globalCalculationInfo.varianceX1,standardErrors.beta_1_stderr,pValues.beta_1_pVal);
-    printf("%s      %lf    %lf    %lf    %lf\n\n",Data.variableNames[indexes.secondIndex],betaCoefficients.beta_2,globalCalculationInfo.varianceX2,standardErrors.beta_2_stderr,pValues.beta_2_pVal);
+    printf("cons       %lf       %lf       %lf       %lf\n",betaCoefficients.beta_0,globalCalculationInfo.varianceY,standardErrors.beta_0_stderr,pValues.beta_0_pVal);
+    printf("%s         %lf       %lf       %lf       %lf\n",Data.variableNames[indexes.firstIndex],betaCoefficients.beta_1,globalCalculationInfo.varianceX1,standardErrors.beta_1_stderr,pValues.beta_1_pVal);
+    printf("%s         %lf       %lf       %lf       %lf\n\n",Data.variableNames[indexes.secondIndex],betaCoefficients.beta_2,globalCalculationInfo.varianceX2,standardErrors.beta_2_stderr,pValues.beta_2_pVal);
     return 0;
 }
 
@@ -662,6 +665,31 @@ int runRegression(){
     return 1;
 }
 
+
+int exportRegressionResults(const char *fileName) {
+    FILE *file = fopen(fileName, "w");
+
+    if (file == NULL) {
+        perror("Error opening file");
+        return 1;  // Return an error code
+    }
+
+    size_t boundarySize = 70;
+    char boundary[boundarySize];
+    memset(boundary, '-', boundarySize - 1);
+    boundary[boundarySize - 1] = '\0';
+
+    fprintf(file, "\nOutput: %s\n%s\n", Data.variableNames[indexes.zerothIndex], boundary);
+    fprintf(file, "Var         Coeff         Variance         StdErr         P(|T|>t)\n %s\n", boundary);
+    fprintf(file, "cons       %lf       %lf       %lf       %lf\n", betaCoefficients.beta_0, globalCalculationInfo.varianceY, standardErrors.beta_0_stderr, pValues.beta_0_pVal);
+    fprintf(file, "%s         %lf       %lf       %lf       %lf\n", Data.variableNames[indexes.firstIndex], betaCoefficients.beta_1, globalCalculationInfo.varianceX1, standardErrors.beta_1_stderr, pValues.beta_1_pVal);
+    fprintf(file, "%s         %lf       %lf       %lf       %lf\n\n", Data.variableNames[indexes.secondIndex], betaCoefficients.beta_2, globalCalculationInfo.varianceX2, standardErrors.beta_2_stderr, pValues.beta_2_pVal);
+
+    fclose(file);
+
+    return 0;
+}
+
 /*
 Based on the regression parameters provided,use parallel computation to make a data copy to be used in the regressions, into an array.
 For example:
@@ -692,11 +720,6 @@ void assignVariableIndexes(char* givenY, char*  givenX1, char* givenX2){
 Check provided Regression parameters. If they donot match data variables, return false 
 */
 int checkRegressionParameters(char* givenY, char*  givenX1, char* givenX2){
-    // printf("%s %s %s\n",givenY,givenX1,givenX2);
-    // printf("%s %s %s\n",Data.variableNames[0],Data.variableNames[1],Data.variableNames[2]);
-    // printf("%d\n",strcmp(Data.variableNames[0],givenY));
-    // printf("%d\n",strcmp(Data.variableNames[1],givenX1));
-    // printf("%d\n",strcmp(Data.variableNames[2],givenX2));
     for (int i=0;i<=2;i++){
         char* comparator=Data.variableNames[i];
         if (
@@ -710,10 +733,36 @@ int checkRegressionParameters(char* givenY, char*  givenX1, char* givenX2){
     return true;
 }
 
+// Export to text file Function 
+
 // Execute shell commands
 int executeCommand(char command[]) {
-    // exit
-    if (strcmp(command, "e") == 0) {
+    //  reg command
+    if (strncmp(command, "reg ", 4) == 0) {
+        if (data_primed){
+            char givenY[MAX_VARIABLE_NAME_LENGTH], givenX1[MAX_VARIABLE_NAME_LENGTH], givenX2[MAX_VARIABLE_NAME_LENGTH];  
+        // Extract the next three variables
+            int offset = 4;  // Skip the "reg " part
+            int count = sscanf(command + offset, "%49s %49s %49s", givenY, givenX1, givenX2);
+
+            if ((count == 3) && (checkRegressionParameters(givenY, givenX1, givenX2))) {
+                assignVariableIndexes(givenY, givenX1, givenX2);
+                createdIndexedData();
+                runRegression();
+                regression_primed=true;
+                return 1;
+            } else {
+                printf("Invalid regression paramter specified\n");
+                return 1;
+            }
+        } else {
+            printf("Data is not loaded yet.\n");
+            return 1;
+        }
+
+    }
+        // exit
+    if (strcmp(command, "exit") == 0) {
         printf("Exiting program\n");
         return -1;
     }
@@ -745,28 +794,37 @@ int executeCommand(char command[]) {
         return 1;
     }
 
-    //  reg command
-    if (strncmp(command, "reg ", 4) == 0) {
-        if (data_primed){
-            char givenY[MAX_VARIABLE_NAME_LENGTH], givenX1[MAX_VARIABLE_NAME_LENGTH], givenX2[MAX_VARIABLE_NAME_LENGTH];  
-        // Extract the next three variables
-            int offset = 4;  // Skip the "reg " part
-            int count = sscanf(command + offset, "%49s %49s %49s", givenY, givenX1, givenX2);
+    // Export command 
+    if (strncmp(command, "export ", 7) == 0) {
+        if (regression_primed){
+            if (strncmp(command, "export ", 7) == 0) {
+                // Check if the filename is provided after "export "
+                const char* filename = command + 7;
 
-            if ((count == 3) && (checkRegressionParameters(givenY, givenX1, givenX2))) {
-                assignVariableIndexes(givenY, givenX1, givenX2);
-                createdIndexedData();
-                runRegression();
+                // Check if the filename has a .txt extension
+                size_t filename_length = strlen(filename);
+                const char* extension = ".txt";
+                size_t extension_length = strlen(extension);
+
+            if (filename_length > extension_length &&
+                strcmp(filename + filename_length - extension_length, extension) == 0) {
+                // Call the exportFunction with the provided filename
+                if (exportRegressionResults("output.txt") == 0) {
+                    printf("Regression results exported successfully.\n");
+                } else {
+                    printf("Failed to export regression results.\n");
+                    return 1;
+                }
                 return 1;
             } else {
-                printf("Invalid regression paramter specified\n");
+                printf("Invalid filename extension. Please specify a .txt file.\n");
                 return 1;
+                }
             }
-        } else {
-            printf("Data is not loaded yet.\n");
+        } else{
+            printf("No regression results stored. Call export immediatley after running a regression\n");
             return 1;
         }
-
     }
     // Unrecognized command
     return 0;
