@@ -1,3 +1,13 @@
+/**
+regression.cu
+--------------------------------------------------------------------------
+DESCRPTION:
+This is the main file that compiles into the shell.
+We read CSV from this file, implment shell commands in this file.
+We define wrappers for the parallel CUDA code, in kernels.cuh 
+--------------------------------------------------------------------------
+*/
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,21 +19,38 @@
 #include "kernels.cuh"
 #include "regression_info.cuh"
 
-#define MAX_VARIABLES 3
-#define MAX_DATA_POINTS 1000
-#define MAX_VARIABLE_NAME_LENGTH 50
-#define MAX_COMMAND_LENGTH 100
+#define MAX_VARIABLES 3 //Max number of variables
+#define MAX_DATA_POINTS 1000 // Max number of data points
+#define MAX_VARIABLE_NAME_LENGTH 50 //Max variable name length
+#define MAX_COMMAND_LENGTH 100 //maximum length of command
 
+// Data is stored globally on the data variable
 data_t Data;
+
+// Indicates if data has been loaded from the csv file yet
 bool data_primed = false;
 
+// Store Calc info (See struct comments)
 calculationInfo_t globalCalculationInfo;
+
+// Store beta coefficients
 betaCoefficients_t betaCoefficients;
+
+// Store standard errors
 standardErrors_t standardErrors;
+
+// Store P Values
 pValues_t pValues;
+
+// Indexes are assigned according to the "reg [var1] [var2] [var3]"
+// See struct definition. Zeroth element of the struct is assigned to the index of var1
+// First element of the struct is assigned to the index of var2 and so on
 varIndex_t indexes;
 
-// Function to print the imported data
+/*
+P: int* data (The Data to be passed to print)
+Takes in the Data from the CSV file and print it in an orderly fashion
+*/
 void printCSVData(int* data) {
     printf("Variable Names:\n");
     for (int i = 0; i < Data.numVars; i++) {
@@ -40,7 +67,10 @@ void printCSVData(int* data) {
     }
 }
 
-// Function to read CSV file and initialize data array
+/*
+P: const char *filename (the location of the csv file)
+Read the file csv file and store it in a 1-D array
+*/
 int readCSV(const char *filename) {
     FILE *file = fopen(filename, "r");
 
@@ -59,9 +89,6 @@ int readCSV(const char *filename) {
             // Remove leading and trailing whitespaces
             sscanf(token, " %[^ \t\n]", Data.variableNames[variableIndex]);
 
-            // Print variable names if needed
-            // printf("Variable %d: %s\n", variableIndex + 1, Data.variableNames[variableIndex]);
-
             token = strtok(NULL, ",");
             variableIndex++;
         }
@@ -76,10 +103,6 @@ int readCSV(const char *filename) {
 
         while (token != NULL && variableIndex < MAX_VARIABLES) {
             sscanf(token, " %d", &Data.data[dataPointIndex * Data.numVars + variableIndex]);
-
-            // Print data if needed
-            // printf("%s: %d\n", Data.variableNames[variableIndex], data[dataPointIndex * Data.numVars + variableIndex]);
-
             token = strtok(NULL, ",");
             variableIndex++;
         }
@@ -92,105 +115,178 @@ int readCSV(const char *filename) {
     return 0;
 }
 
-
-int copyDataToGPU(){
-    int *gpu_data, *gpu_data_cpy;
-    
-    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-
-    cudaMemcpy(gpu_data,Data.data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
-
-    int blockSize = 256;
-    int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
-
-    copyArrayKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS));
-    
-    cudaDeviceSynchronize();
-
-    cudaMemcpy(Data.data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
-    
-    // printCSVData(data_cpy);
-    cudaFree(gpu_data);
-    cudaFree(gpu_data_cpy);
-    return 1;
-}
-
+/*
+Based on the regression parameters provided,use parallel computation to make a data copy to be used in the regressions, into an array.
+For example:
+    Data is initally loaded as:
+        y x1 x2
+        0  1  2 : Original Indexes
+    A copy of the Data is converted to the following, given the user command:
+        reg x2 y x1, then
+        x2 y x1
+        2  0  1
+*/
 int createdIndexedData(){
-    int *gpu_data, *gpu_data_cpy;
+    int *gpu_data, *gpu_data_cpy; // gpu_data: Data to be sent to GPU. gpu_data_cpy: Output from GPU
     
-    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    // Malloc space for original data
+    if(cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMemcpy(gpu_data,Data.data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    // Malloc space for GPU output
+    if (cudaMalloc((void**)&gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
+    // Copy Original Data to GPU
+    if (cudaMemcpy(gpu_data,Data.data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    // Set block and gridsize
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
+    // Call Kernels
     createdIndexedDataKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,0,indexes.zerothIndex,(MAX_VARIABLES*MAX_DATA_POINTS));
     createdIndexedDataKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,1,indexes.firstIndex,(MAX_VARIABLES*MAX_DATA_POINTS));
     createdIndexedDataKernel<<<gridSize,blockSize>>>(gpu_data,gpu_data_cpy,2,indexes.secondIndex,(MAX_VARIABLES*MAX_DATA_POINTS));
     
-    cudaDeviceSynchronize();
+    // Synchronize Device
+    if (cudaDeviceSynchronize()!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMemcpy(Data.data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+    // Copy back results from GPU to Host
+    if (cudaMemcpy(Data.data_cpy,gpu_data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
     cudaFree(gpu_data);
     cudaFree(gpu_data_cpy);
+
     return 1;
 }
 
+/*
+Calculate square of the given variable paralelly
+P: xvar(0 if y, 1 if x1, 2 if x2)
+*/
 int calculateVarSquared(int xvar){
-    int *gpu_data;
-    int *gpu_result;
-    int sum=0;
+    int *gpu_data; // Store data in GPU
+    int *gpu_result; // Store gpu result
+    int sum=0; 
 
-    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpu_data,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    // Malloc space for gpu data
+    if(cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    // Send result array for gpu result array (need an array becasue atomicAdd needs to be passed an array for atomic addition)
+    if(cudaMemcpy(gpu_data,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpu_result,sizeof(int));
-    cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice);
+    // Malloc space for GPU result 
+    if(cudaMalloc((void**)&gpu_result,sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    // Copy result from host to device
+    if(cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
     calculateSquareKernel<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS),xvar);
 
-    cudaDeviceSynchronize();
-    cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
+    // Sync GPU and host
+    if (cudaDeviceSynchronize()!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    // Copy Result back
+    if (cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
     cudaFree(gpu_data);
     cudaFree(gpu_result);
 
+    // Store into appropriate struct  
     if(xvar==1)  globalCalculationInfo.sumSquaredX1=sum;
     if(xvar==2) globalCalculationInfo.sumSquaredX2=sum;
 
     return 0;
 }
 
-
+/**
+Calculate sum of product squared parallely
+P: var1 (first var index)
+   var2 (second var index)
+*/
 int calculateSumOfProductSquared(int var1, int var2){
-    int *gpuData,*gpuResult;
+    int *gpuData,*gpuResult; // Variable to GPU data and result
     int sum=0;
 
-    cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    // Malloc space for GPU and copy it to GPU
+    // We pass gpuResult, an array, since we need to pass it for atomicAdd function.
+    if(cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpuResult,sizeof(int));
-    cudaMemcpy(gpuResult,&sum,sizeof(int),cudaMemcpyHostToDevice);
+    if(cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
+    if(cudaMalloc((void**)&gpuResult,sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    if(cudaMemcpy(gpuResult,&sum,sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    // Set grid and block size
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
     calculateSumOfProductSquaredKernel<<<gridSize,blockSize>>>(gpuData,gpuResult,(MAX_VARIABLES*MAX_DATA_POINTS),var1,var2);
     
-    cudaDeviceSynchronize();
+    // Syncrhronize GPU and host
+    if(cudaDeviceSynchronize()!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMemcpy(&sum,gpuResult,sizeof(int),cudaMemcpyDeviceToHost);
+    // Get result back from GPU
+    if(cudaMemcpy(&sum,gpuResult,sizeof(int),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
     cudaFree(gpuResult);
     cudaFree(gpuData);
 
+    // Assign to appropriate struct
     if ((var1==0)&&(var2==1)) globalCalculationInfo.sumX1Y=sum;
     if ((var1==0)&&(var2==2)) globalCalculationInfo.sumX2Y=sum;
     if ((var1==1)&&(var2==2)) globalCalculationInfo.sumX1X2=sum;
@@ -198,54 +294,118 @@ int calculateSumOfProductSquared(int var1, int var2){
     return 0;
 }
 
+/*
+Calculate Variable Sum parallely
+P: var (the variable index to calculate it for)
+*/
 int calculateVarSum(int var){
+    // Initialize vars to send to GPU
     int *gpu_data;
     int *gpu_result;
     int sum=0;
 
-    cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpu_data,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    // Malloc space and copy stuff to GPU     
+    if(cudaMalloc((void**)&gpu_data,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpu_result,sizeof(int));
-    cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice);
+    if(cudaMemcpy(gpu_data,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
+    if(cudaMalloc((void**)&gpu_result,sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    if(cudaMemcpy(gpu_result,&sum,sizeof(int),cudaMemcpyHostToDevice)){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    // Block and GridSize
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
+    // Call Kernel
     calculateVarSumKernel<<<gridSize,blockSize>>>(gpu_data,gpu_result,(MAX_VARIABLES*MAX_DATA_POINTS),var);
 
-    cudaDeviceSynchronize();
-    cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost);
+    // Synchronize Device
+    if(cudaDeviceSynchronize()!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    // Copy Result back
+    if(cudaMemcpy(&sum,gpu_result,sizeof(int),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
     cudaFree(gpu_data);
     cudaFree(gpu_result);
 
+    // Assign to appropriate struct
     if (var==0) globalCalculationInfo.sumY=sum;
     if (var==1) globalCalculationInfo.sumX1=sum;
     if (var==2) globalCalculationInfo.sumX2=sum;
     return 0;
 }
 
+/*
+Predict Model paralelly from calculaed GPU
+*/
 int predictModel(){
+    // Initialize Variables to send to  GPU
     int *gpuData;
     int *gpuPredictions;
     int *gpuResiduals;
 
-    cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMalloc((void**)&gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    // Malloc space for data in GPU and copy it to the GPU
+    if(cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    if(cudaMalloc((void**)&gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    if(cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    if(cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
+    // Set Grid size and blocksize
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
+    // Call Kernel
     predictModelKernel<<<gridSize,blockSize>>>(gpuData,gpuPredictions,gpuResiduals,betaCoefficients.beta_0,betaCoefficients.beta_1,betaCoefficients.beta_2,MAX_VARIABLES,Data.numObservations);
 
-    cudaDeviceSynchronize();
+    // Synchronize Device with GPU
+    if(cudaDeviceSynchronize()!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMemcpy(Data.predictions,gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
-    cudaMemcpy(globalCalculationInfo.residuals,gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost);
+    // Copy results GPU
+    if(cudaMemcpy(Data.predictions,gpuPredictions,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    // Copy results GPU
+    if(cudaMemcpy(globalCalculationInfo.residuals,gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
     
 
     cudaFree(gpuData);
@@ -254,7 +414,11 @@ int predictModel(){
     return 0;
 }
 
+/*
+Calculate the standard errors for the residuals of the model parallely
+*/
 int calculateStandardErrors(){
+    // Initialize values for GPU
     int *gpuResiduals, *gpuResidualSum;
     int *gpuVarianceArr;
 
@@ -263,26 +427,67 @@ int calculateStandardErrors(){
 
     int sum=0;
 
-    cudaMalloc((void**)&gpuVarianceResiduals,sizeof(double));
-    cudaMemcpy(gpuVarianceResiduals,&varianceResiduals,sizeof(double),cudaMemcpyHostToDevice);
+    //  Malloc host code to GPU
+    if(cudaMalloc((void**)&gpuVarianceResiduals,sizeof(double))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    if(cudaMemcpy(gpuVarianceResiduals,&varianceResiduals,sizeof(double),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpuResiduals,globalCalculationInfo.residuals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    if(cudaMalloc((void**)&gpuResiduals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpuResidualSum,sizeof(int));
-    cudaMemcpy(gpuResidualSum,&sum,sizeof(int),cudaMemcpyHostToDevice);
+    if(cudaMemcpy(gpuResiduals,globalCalculationInfo.residuals,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpuVarianceArr,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    if(cudaMalloc((void**)&gpuResidualSum,sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    if(cudaMemcpy(gpuResidualSum,&sum,sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    if(cudaMalloc((void**)&gpuVarianceArr,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
+    // Call Kernel 
     calculateStandardErrorsKernel<<<gridSize,blockSize>>>(gpuResiduals,gpuResidualSum,gpuVarianceArr,gpuVarianceResiduals,Data.numObservations,(MAX_VARIABLES*MAX_DATA_POINTS));
 
-    cudaDeviceSynchronize();
-    cudaMemcpy(&sum,gpuResidualSum,sizeof(int),cudaMemcpyDeviceToHost);
-    cudaMemcpy(&varianceResiduals,gpuVarianceResiduals,sizeof(double),cudaMemcpyDeviceToHost);
+    // Synchrnonize Device 
+    if(cudaDeviceSynchronize()!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    // Copy back results
+    if(cudaMemcpy(&sum,gpuResidualSum,sizeof(int),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
+    // Copy back results
+    if(cudaMemcpy(&varianceResiduals,gpuVarianceResiduals,sizeof(double),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+
+    // Assign result to struct
     globalCalculationInfo.residualVariance=varianceResiduals;
 
     cudaFree(gpuVarianceResiduals);
@@ -292,23 +497,46 @@ int calculateStandardErrors(){
     return 0;
 }
 
+/**
+Calculate Variance for the given variables parallely
+*/
 int calculateVarVariance(int var){
+    // Initialize GPU data
     int *gpuData, *gpuNumeratorSumArr;
     double *gpuVarVariance;
 
     double variance=0;
 
-    cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
-    cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice);
+    // Malloc and copy data from Host to Device
+    if(cudaMalloc((void**)&gpuData,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    if(cudaMemcpy(gpuData,Data.data_cpy,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpuVarVariance,sizeof(double));
-    cudaMemcpy(gpuVarVariance,&variance,sizeof(double),cudaMemcpyHostToDevice);
+    if(cudaMalloc((void**)&gpuVarVariance,sizeof(double))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    if(cudaMemcpy(gpuVarVariance,&variance,sizeof(double),cudaMemcpyHostToDevice)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-    cudaMalloc((void**)&gpuNumeratorSumArr,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int));
+    if(cudaMalloc((void**)&gpuNumeratorSumArr,(MAX_VARIABLES*MAX_DATA_POINTS)*sizeof(int))!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
+    // Set grid and blocksize
     int blockSize = 256;
     int gridSize = ((MAX_VARIABLES*MAX_DATA_POINTS)+ blockSize - 1) / blockSize;
 
+    // Calculate mean, to be passed to kernel
     int varMean = 0;
     if (var==0) varMean=globalCalculationInfo.sumY/Data.numObservations;
     if (var==1) varMean=globalCalculationInfo.sumX1/Data.numObservations;
@@ -318,10 +546,19 @@ int calculateVarVariance(int var){
                                                         Data.numObservations,var,varMean,
                                                         (MAX_VARIABLES*MAX_DATA_POINTS));
 
-    cudaDeviceSynchronize();
-    cudaMemcpy(&variance,gpuVarVariance,sizeof(double),cudaMemcpyDeviceToHost);
+    // Syncrhonize Device
+    if(cudaDeviceSynchronize()!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
+    
+    // Copy back result from GPU to Host
+    if(cudaMemcpy(&variance,gpuVarVariance,sizeof(double),cudaMemcpyDeviceToHost)!=cudaSuccess){
+        fprintf(stderr,"Failed to allocate memory to GPU\n");
+        exit(-1);
+    }
 
-
+    // Assign to apppropirate struct
     if (var==0) globalCalculationInfo.varianceY=variance;
     if (var==1) globalCalculationInfo.varianceX1=variance;
     if (var==2) globalCalculationInfo.varianceX2=variance;
@@ -333,6 +570,9 @@ int calculateVarVariance(int var){
     return 0;
 }
 
+/*
+This function uses all the relevant info calculated till now and calculated the beta coefficients
+*/
 int calculateBetas(){
     calculationInfo_t cInfo=globalCalculationInfo;
 
@@ -352,7 +592,9 @@ int calculateBetas(){
     return 0;  
 }
 
-
+/*
+Calculate P values using GSL libraries
+*/
 void calculatePValues(){
     double t_Stat_beta_0=betaCoefficients.beta_0/standardErrors.beta_0_stderr;
     double t_Stat_beta_1=betaCoefficients.beta_1/standardErrors.beta_1_stderr;
@@ -366,7 +608,9 @@ void calculatePValues(){
     
 }
 
-
+/*
+Print Regression Results in an orderly manner
+*/
 int printRegressionResults(){
     size_t boundarySize=70;
     char boundary[boundarySize];
@@ -381,6 +625,10 @@ int printRegressionResults(){
     return 0;
 }
 
+/*
+Run Regression and all the required components.
+Call all kernel wrappers to call GPU code
+*/
 int runRegression(){
     printf("Running Regression...\n");
     calculateVarSquared(1);
@@ -414,8 +662,19 @@ int runRegression(){
     return 1;
 }
 
+/*
+Based on the regression parameters provided,use parallel computation to make a data copy to be used in the regressions, into an array.
+For example:
+    Data is initally loaded as:
+        y x1 x2
+        0  1  2 : Original Indexes
+    A copy of the Data is converted to the following, given the user command:
+        reg x2 y x1, then
+        x2 y x1
+        2  0  1
+*/
 void assignVariableIndexes(char* givenY, char*  givenX1, char* givenX2){
-
+    // Go through all variables, and the user given variables. Assign actual variables accordingly
     if (strcmp(Data.variableNames[0],givenY)==0) indexes.zerothIndex=0;
     if (strcmp(Data.variableNames[1],givenY)==0) indexes.zerothIndex=1;
     if (strcmp(Data.variableNames[2],givenY)==0) indexes.zerothIndex=2;
@@ -429,6 +688,29 @@ void assignVariableIndexes(char* givenY, char*  givenX1, char* givenX2){
     if (strcmp(Data.variableNames[2],givenX2)==0) indexes.secondIndex=2;
 }
 
+/**
+Check provided Regression parameters. If they donot match data variables, return false 
+*/
+int checkRegressionParameters(char* givenY, char*  givenX1, char* givenX2){
+    // printf("%s %s %s\n",givenY,givenX1,givenX2);
+    // printf("%s %s %s\n",Data.variableNames[0],Data.variableNames[1],Data.variableNames[2]);
+    // printf("%d\n",strcmp(Data.variableNames[0],givenY));
+    // printf("%d\n",strcmp(Data.variableNames[1],givenX1));
+    // printf("%d\n",strcmp(Data.variableNames[2],givenX2));
+    for (int i=0;i<=2;i++){
+        char* comparator=Data.variableNames[i];
+        if (
+            (strcmp(comparator,givenY)!=0) &&
+            (strcmp(comparator,givenX1)!=0) &&
+            (strcmp(comparator,givenX2)!=0)
+        ){
+            return false;
+        }
+    }
+    return true;
+}
+
+// Execute shell commands
 int executeCommand(char command[]) {
     // exit
     if (strcmp(command, "e") == 0) {
@@ -463,7 +745,7 @@ int executeCommand(char command[]) {
         return 1;
     }
 
-
+    //  reg command
     if (strncmp(command, "reg ", 4) == 0) {
         if (data_primed){
             char givenY[MAX_VARIABLE_NAME_LENGTH], givenX1[MAX_VARIABLE_NAME_LENGTH], givenX2[MAX_VARIABLE_NAME_LENGTH];  
@@ -471,21 +753,19 @@ int executeCommand(char command[]) {
             int offset = 4;  // Skip the "reg " part
             int count = sscanf(command + offset, "%49s %49s %49s", givenY, givenX1, givenX2);
 
-            if (count == 3) {
+            if ((count == 3) && (checkRegressionParameters(givenY, givenX1, givenX2))) {
                 assignVariableIndexes(givenY, givenX1, givenX2);
                 createdIndexedData();
                 runRegression();
                 return 1;
             } else {
-                // Invalid format
-                printf("Invalid command format.\n");
+                printf("Invalid regression paramter specified\n");
                 return 1;
             }
-            } else {
-            // Conditions not met
-                printf("Invalid command format.\n");
-                return 1;
-            }
+        } else {
+            printf("Data is not loaded yet.\n");
+            return 1;
+        }
 
     }
     // Unrecognized command

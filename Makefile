@@ -9,4 +9,4 @@ $(TARGET): $(SRCS)
 
 clean:
 	rm -f $(TARGET)
-
+# NOTE: GSL library must be installed
