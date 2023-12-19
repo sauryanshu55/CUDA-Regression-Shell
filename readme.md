@@ -1,11 +1,11 @@
-﻿# Ordinary Least Squares Regression Project 
+﻿# Ordinary Least Squares (OLS) Regression Shell
 
 ### Collaborators
 
  faheemmu@grinnell.edu  Muhammad Faheem
  khanalsa@grinnell.edu Sauryanshu Khanal
 
-### Project Implementation
+### Implementation
 
 We will conduct an OLS regression with a .csv file as an input and we will output the results of running the regression in a text file. The output will include coefficient, variance, standard errors and p-values with the specific regression model that the user specifies in the shell. 
 More information: https://www.statology.org/multiple-linear-regression/
