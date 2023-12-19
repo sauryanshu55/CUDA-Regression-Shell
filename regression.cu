@@ -74,6 +74,7 @@ void printCSVData(int* data) {
 P: const char *filename (the location of the csv file)
 Read the file csv file and store it in a 1-D array
 */
+
 int readCSV(const char *filename) {
     FILE *file = fopen(filename, "r");
 
@@ -357,6 +358,7 @@ int calculateVarSum(int var){
     return 0;
 }
 
+
 /*
 Predict Model paralelly from calculaed GPU
 */
@@ -384,6 +386,7 @@ int predictModel(){
         fprintf(stderr,"Failed to allocate memory to GPU\n");
         exit(-1);
     }
+
 
     // Set Grid size and blocksize
     int blockSize = 256;
@@ -632,6 +635,8 @@ int printRegressionResults(){
 Run Regression and all the required components.
 Call all kernel wrappers to call GPU code
 */
+
+
 int runRegression(){
     printf("Running Regression...\n");
     calculateVarSquared(1);

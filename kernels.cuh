@@ -91,6 +91,25 @@ __global__ void calculateVarVarianceKernel(int *data, int *numeratorSumArr, doub
 }
 
 
+__global__ void predictModelKernel(int *data, double *predictions,double* residuals, double beta_0, double beta_1,double beta_2, int MAX_VARIABLES, int numObservations){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (tid < numObservations) {
+        int offset = tid * MAX_VARIABLES;
+
+        // Extract variables for the observation
+        int y = data[offset];
+        int x1 = data[offset + 1];
+        int x2 = data[offset + 2];
+
+        // Calculate the prediction using the provided beta coefficients
+        predictions[tid] = beta_0 + beta_1 * x1 + beta_2 * x2;
+        __syncthreads();
+        residuals[tid]=y-predictions[tid];
+    }
+    
+}
+
 // CUDA kernel to copy array from device to device
 __global__ void copyArrayKernel(int *data, int *data_copy, int size) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -138,6 +157,7 @@ __global__ void calculateVarSumKernel(int* data, int* sum, int size,int var){
         atomicAdd(sum,data[index]);
     }
 }
+
 
 // CUDA kernel to index data as given per user regression instructions
 __global__ void createdIndexedDataKernel(int *data, int *data_copy,int indexToPut, int actualIndex, int size) {

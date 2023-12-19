@@ -12,7 +12,7 @@ Define Structs used in regression.cu in this file
 
 // This struct stores all relevant "backend", calculation-side information.
 typedef struct calculationInfo_t{
-    int residuals[MAX_VARIABLES * MAX_DATA_POINTS];
+    double residuals[MAX_VARIABLES * MAX_DATA_POINTS];
     int sumSquaredX1;
     int sumSquaredX2;
     int sumX1X2;
@@ -49,6 +49,7 @@ typedef struct data_t{
     int numVars;
     int numObservations;
     
+
     int predictions[MAX_VARIABLES * MAX_DATA_POINTS];
 } data_t;
 
@@ -76,3 +77,4 @@ typedef struct varIndex_t{
     int firstIndex;
     int secondIndex;
 } varIndex_t;
+
