@@ -1,4 +1,4 @@
-﻿# Ordinary Least Squares (OLS) Regression Shell
+﻿# Multithreaded OLS Regression Shell
 
 ### Collaborators
 
