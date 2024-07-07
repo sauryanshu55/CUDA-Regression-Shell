@@ -60,26 +60,7 @@ Note: it will put the regression results of most recent model (reg x1 x2 y in ou
 exit              // Exit the terminal 
 ```
 
-### Formulas used for calculation: 
-*Residuals:*
-![enter image description here](https://imgur.com/zTFiSCQl.png)
-*Standard Error for each coefficient estimate:*   
-![enter image description here](https://imgur.com/KnunKSsl.png)
-*Variance for Residuals:*         
-![enter image description here](https://imgur.com/FurO2YFl.png)
-*Standard error for each X variable*
-![enter image description here](https://imgur.com/mokjyMWl.png)
-*Coefficient:*      https://www.statology.org/multiple-linear-regression-by-hand/
-*P-value*: We used the GNU Science Library to calculate that (approved by Charlie)
 
-
-### Core Concepts Used 
-
-**File Systems**           : Import and Export files for data reading and storing 
-**GPUs**                   : For efficient crunching of numbers and data manipulation 
-**Thread Synchronization** : To avoid race conditions and correct parallelization
-
-Note: In our presentation, we said our this process would be processes instead of thread synchronization. However, Professor Curtsinger mentioned that the thread synchronization was complex enough and was more than necessary so we use that as our third core concept.
 
 ### Notes
 1. Inside the shell, you can always load new datasets as you see fit to run new regressions.
